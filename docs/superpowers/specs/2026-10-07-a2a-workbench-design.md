@@ -147,11 +147,11 @@ a2a-workbench/
 │   │   ├── api/               # FastAPI routers, WS hub, schemas (pydantic)
 │   │   ├── cli/               # Typer app: every core operation as a command
 │   │   ├── mcp/               # MCP server exposing core operations as tools
+│   │   ├── fixtures/          # "agent zoo": test agents built with the a2a-sdk server
 │   │   └── static/            # built SPA (generated, not committed)
 │   └── tests/
 ├── web/                       # React + TypeScript + Vite (pnpm)
 │   └── src/{app,features/<tab>,components,lib}
-├── fixtures/                  # "agent zoo": test agents built with a2a-sdk server
 ├── docs/
 ├── Dockerfile, docker-compose.yml
 └── LICENSE (Apache-2.0), NOTICE, README.md, CONTRIBUTING.md
@@ -338,7 +338,7 @@ a2a-workbench mcp [--transport stdio|http]
   **NDJSON**, one event per line, in the same `TimelineEvent` shape the UI
   uses.
 - **Stable exit codes:** 0 ok, 1 checks failed, 2 usage error, 3 connection
-  error, 4 auth error, 5 protocol error.
+  error, 4 auth error, 5 protocol error, 6 internal error.
 - **Never interactive** when stdin is not a TTY or `--no-input` is set.
   Credentials come from flags, env vars (`A2AW_AUTH_<AGENT>_…`) or
   `--auth-file`. Interactive OAuth flows print the URL or device code and wait.
@@ -456,7 +456,8 @@ toggle). Connect flow (fetch card, verify signature, pick interface). About
 tab. Chat with send and stream, all Part types, `input_required` reply, stop
 task, and the Options menu. Inspect drawer with WireRecorder. CLI: `serve`,
 `agents`, `card`, `send` (with NDJSON streaming), `--json` and exit codes.
-Agent zoo: `compliant-v1` (JSON-RPC). Packaging: `uvx` and Docker.
+Agent zoo: `compliant-v1` (JSON-RPC). Packaging: `uvx` and Docker. The schema is created with `create_all`;
+Alembic migrations arrive in Phase 7, before the first public release.
 
 **Phase 2 — Every binding and version, tasks, and failure injection**
 REST and gRPC bindings, v0.3 compat, connection popover switching. Tasks tab
