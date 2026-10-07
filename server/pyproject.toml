@@ -38,6 +38,7 @@ artifacts = ["a2a_workbench/static/**"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`:UserWarning"]
 
 [tool.ruff]
 line-length = 100
