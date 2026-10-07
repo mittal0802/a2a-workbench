@@ -1,0 +1,10 @@
+**/node_modules
+**/.venv
+**/__pycache__
+web/dist
+web/test-results
+web/playwright-report
+server/a2a_workbench/static
+server/dist
+.git
+.superpowers

@@ -52,7 +52,7 @@ export function buildTurns(events: TimelineEvent[]): Turn[] {
       const msg = (e.kind === "status" ? e.data.status?.message : e.data.task?.status?.message) as
         | A2AMessage
         | undefined;
-      if (msg) agent.statusMessage = msg;
+      agent.statusMessage = msg ?? null;
       if (e.kind === "task") {
         for (const a of (e.data.task?.artifacts ?? []) as A2AArtifact[]) agent.artifacts[a.artifactId] = a;
       }

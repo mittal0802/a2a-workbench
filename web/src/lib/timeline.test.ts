@@ -79,4 +79,15 @@ describe("buildTurns", () => {
     if (agent.kind !== "agent") throw new Error();
     expect(agent.states).toEqual(["working"]);
   });
+
+  it("drops an earlier status message once a later status has none", () => {
+    const turns = buildTurns([
+      ev(1, "user_message", { message: { parts: [] } }, null),
+      ev(2, "status", { state: "working", status: { message: { parts: [{ text: "Working on it" }] } } }),
+      ev(3, "status", { state: "completed", status: {} }),
+    ]);
+    const agent = turns[1];
+    if (agent.kind !== "agent") throw new Error();
+    expect(agent.statusMessage).toBeNull();
+  });
 });

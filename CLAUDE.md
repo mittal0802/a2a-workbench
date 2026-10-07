@@ -78,6 +78,19 @@ def assemble_artifact(chunks: list[TaskArtifactUpdateEvent]) -> Artifact:
 
 Bad: `"""Merges chunks. Used by ConversationService and the CLI send command."""`
 
+## Commands
+
+```bash
+cd server && uv sync                     # backend deps
+cd server && uv run pytest -q            # backend tests (spins up zoo agents)
+cd server && uv run ruff check . && uv run ruff format --check .
+cd web && pnpm install && pnpm test      # frontend unit tests
+cd web && pnpm lint                      # typecheck
+scripts/dev.sh                           # zoo :9999, API :8484, Vite :5173
+scripts/build.sh [--no-wheel]            # SPA into the package, then wheel
+cd web && pnpm e2e                       # Playwright (needs scripts/build.sh first)
+```
+
 ## Architecture rules
 
 - `a2a_workbench.core` has no FastAPI, web, Typer or MCP imports. `api/`,
