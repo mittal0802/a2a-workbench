@@ -98,7 +98,8 @@ class ConversationService:
 
     Each emitted event gets the next per-conversation sequence number, is stored,
     and is published as ``{"type": "event", "event": ...}`` on
-    ``conversation:<id>``. Operations on one conversation run one at a time.
+    ``conversation:<id>``. Sends and cancellations may overlap; sequence numbers
+    stay gap-free and unique per conversation.
     """
 
     def __init__(self, db: Database, bus: EventBus, sink: ExchangeSink, blobs: BlobService) -> None:
@@ -159,7 +160,7 @@ class ConversationService:
             return [_event_from_row(r) for r in rows.scalars().all()]
 
     async def _emit(self, event: TimelineEvent) -> TimelineEvent:
-        async with self._db.sessions() as session:
+        async with self._locks[event.conversation_id], self._db.sessions() as session:
             conv = await session.get(Conversation, event.conversation_id)
             if conv is None:
                 raise ConversationNotFoundError(f"conversation {event.conversation_id} not found")
@@ -235,61 +236,60 @@ class ConversationService:
         Raises:
             ConversationNotFoundError: if the conversation does not exist.
         """
-        async with self._locks[conversation_id]:
-            conv, agent = await self._load(conversation_id)
+        conv, agent = await self._load(conversation_id)
+        try:
+            built = [await build_part(p, self._blobs.lookup) for p in parts]
+        except Exception as exc:
+            yield await self._error(conversation_id, exc)
+            return
+        message = Message(message_id=uuid.uuid4().hex, role=Role.ROLE_USER, parts=built)
+        context_id = options.context_id or conv.context_id
+        if context_id:
+            message.context_id = context_id
+        task_id = options.task_id or (
+            conv.task_id if conv.task_state in INTERRUPTED_STATES else None
+        )
+        if task_id:
+            message.task_id = task_id
+        yield await self._emit(
+            TimelineEvent(
+                conversation_id=conversation_id,
+                kind="user_message",
+                task_id=task_id,
+                context_id=context_id,
+                data={
+                    "message": to_json(build_request(message, options).message),
+                    "options": options.model_dump(mode="json"),
+                },
+            )
+        )
+        card = card_from_json(agent.card)
+        assembler = ArtifactAssembler()
+        with recording_scope(
+            "send_message", agent_id=agent.id, conversation_id=conversation_id
+        ) as scope:
             try:
-                built = [await build_part(p, self._blobs.lookup) for p in parts]
-            except Exception as exc:
-                yield await self._error(conversation_id, exc)
-                return
-            message = Message(message_id=uuid.uuid4().hex, role=Role.ROLE_USER, parts=built)
-            context_id = options.context_id or conv.context_id
-            if context_id:
-                message.context_id = context_id
-            task_id = options.task_id or (
-                conv.task_id if conv.task_state in INTERRUPTED_STATES else None
-            )
-            if task_id:
-                message.task_id = task_id
-            yield await self._emit(
-                TimelineEvent(
-                    conversation_id=conversation_id,
-                    kind="user_message",
-                    task_id=task_id,
-                    context_id=context_id,
-                    data={
-                        "message": to_json(build_request(message, options).message),
-                        "options": options.model_dump(mode="json"),
-                    },
+                iface = select_interface(
+                    card, options.interface_url or agent.selected_interface_url
                 )
-            )
-            card = card_from_json(agent.card)
-            assembler = ArtifactAssembler()
-            with recording_scope(
-                "send_message", agent_id=agent.id, conversation_id=conversation_id
-            ) as scope:
-                try:
-                    iface = select_interface(
-                        card, options.interface_url or agent.selected_interface_url
+                client = await open_client(card, iface, self._sink, streaming=options.stream)
+                async with client:
+                    stream = client.send_message(
+                        build_request(message, options), context=build_call_context(options)
                     )
-                    client = await open_client(card, iface, self._sink, streaming=options.stream)
-                    async with client:
-                        stream = client.send_message(
-                            build_request(message, options), context=build_call_context(options)
-                        )
-                        async for resp in stream:
-                            yield await self._emit(
-                                event_from_stream_response(
-                                    resp,
-                                    conversation_id=conversation_id,
-                                    assembler=assembler,
-                                    exchange_id=_last_exchange(scope),
-                                )
+                    async for resp in stream:
+                        yield await self._emit(
+                            event_from_stream_response(
+                                resp,
+                                conversation_id=conversation_id,
+                                assembler=assembler,
+                                exchange_id=_last_exchange(scope),
                             )
-                except Exception as exc:
-                    yield await self._error(
-                        conversation_id, exc, task_id=task_id, exchange_id=_last_exchange(scope)
-                    )
+                        )
+            except Exception as exc:
+                yield await self._error(
+                    conversation_id, exc, task_id=task_id, exchange_id=_last_exchange(scope)
+                )
 
     async def cancel(self, conversation_id: str) -> AsyncIterator[TimelineEvent]:
         """Request cancellation of the conversation's current task and yield the outcome.
@@ -297,41 +297,40 @@ class ConversationService:
         Raises:
             ConversationNotFoundError: if the conversation does not exist.
         """
-        async with self._locks[conversation_id]:
-            conv, agent = await self._load(conversation_id)
-            if not conv.task_id or conv.task_state in TERMINAL_STATES:
-                yield await self._emit(
-                    TimelineEvent(
-                        conversation_id=conversation_id,
-                        kind="error",
-                        data={
-                            "category": "workbench",
-                            "message": "There is no running task to stop.",
-                        },
-                    )
+        conv, agent = await self._load(conversation_id)
+        if not conv.task_id or conv.task_state in TERMINAL_STATES:
+            yield await self._emit(
+                TimelineEvent(
+                    conversation_id=conversation_id,
+                    kind="error",
+                    data={
+                        "category": "workbench",
+                        "message": "There is no running task to stop.",
+                    },
                 )
-                return
-            card = card_from_json(agent.card)
-            with recording_scope(
-                "cancel_task", agent_id=agent.id, conversation_id=conversation_id
-            ) as scope:
-                try:
-                    iface = select_interface(card, agent.selected_interface_url)
-                    client = await open_client(card, iface, self._sink, streaming=False)
-                    async with client:
-                        task = await client.cancel_task(CancelTaskRequest(id=conv.task_id))
-                    yield await self._emit(
-                        event_from_stream_response(
-                            StreamResponse(task=task),
-                            conversation_id=conversation_id,
-                            assembler=ArtifactAssembler(),
-                            exchange_id=_last_exchange(scope),
-                        )
-                    )
-                except Exception as exc:
-                    yield await self._error(
-                        conversation_id,
-                        exc,
-                        task_id=conv.task_id,
+            )
+            return
+        card = card_from_json(agent.card)
+        with recording_scope(
+            "cancel_task", agent_id=agent.id, conversation_id=conversation_id
+        ) as scope:
+            try:
+                iface = select_interface(card, agent.selected_interface_url)
+                client = await open_client(card, iface, self._sink, streaming=False)
+                async with client:
+                    task = await client.cancel_task(CancelTaskRequest(id=conv.task_id))
+                yield await self._emit(
+                    event_from_stream_response(
+                        StreamResponse(task=task),
+                        conversation_id=conversation_id,
+                        assembler=ArtifactAssembler(),
                         exchange_id=_last_exchange(scope),
                     )
+                )
+            except Exception as exc:
+                yield await self._error(
+                    conversation_id,
+                    exc,
+                    task_id=conv.task_id,
+                    exchange_id=_last_exchange(scope),
+                )

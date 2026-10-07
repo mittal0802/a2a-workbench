@@ -143,3 +143,30 @@ async def test_unreachable_agent_emits_transport_error(wb, zoo):
     events = await _send(wb, conv.id, "echo")
     assert events[-1].kind == "error" and events[-1].data["category"] == "transport"
     assert events[-1].exchange_id is not None
+
+
+async def test_cancel_works_while_a_stream_is_open(wb, conv):
+    import asyncio
+    import time
+
+    async def consume():
+        return [
+            e
+            async for e in wb.conversations.send(
+                conv.id, [TextPartInput(text="slow 4")], SendOptions()
+            )
+        ]
+
+    sending = asyncio.create_task(consume())
+    for _ in range(100):
+        if (await wb.conversations.get(conv.id)).task_state == "working":
+            break
+        await asyncio.sleep(0.02)
+    started = time.monotonic()
+    cancel_events = [e async for e in wb.conversations.cancel(conv.id)]
+    assert time.monotonic() - started < 2
+    assert cancel_events[-1].data["state"] == "canceled"
+    sent = await sending
+    assert sent[-1].data.get("state") == "canceled"
+    seqs = [e.seq for e in await wb.conversations.events(conv.id)]
+    assert seqs == list(range(1, len(seqs) + 1))
