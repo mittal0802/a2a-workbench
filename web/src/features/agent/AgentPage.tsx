@@ -5,6 +5,7 @@ import { Avatar } from "../../components/Avatar";
 import { api } from "../../lib/api";
 import { AboutView } from "../about/AboutView";
 import { ChatView } from "../chat/ChatView";
+import { InspectDrawer } from "../inspect/InspectDrawer";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
@@ -19,6 +20,8 @@ export function AgentPage() {
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => api.getAgent(agentId) });
   const [prefill, setPrefill] = useState<string | undefined>();
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [focusExchange, setFocusExchange] = useState<string | undefined>();
   const [shownAgent, setShownAgent] = useState(agentId);
   if (shownAgent !== agentId) {
     setShownAgent(agentId);
@@ -26,6 +29,10 @@ export function AgentPage() {
     setPrefill(undefined);
   }
   const changeConversation = useCallback((id: string | null) => setConversationId(id), []);
+  const inspect = useCallback((exchangeId: string) => {
+    setFocusExchange(exchangeId);
+    setInspecting(true);
+  }, []);
 
   if (agent.isError) return <div className="empty">This agent no longer exists.</div>;
   if (!agent.data) return <div className="empty">Loading…</div>;
@@ -41,6 +48,12 @@ export function AgentPage() {
         </span>
         <div className="spacer" />
         <ConnectionMenu agent={a} />
+        <button className="btn" onClick={() => setInspecting(!inspecting)} aria-pressed={inspecting}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+          </svg>
+          Inspect
+        </button>
       </div>
       <div className="tabs" role="tablist">
         {TABS.map((t) => (
@@ -57,7 +70,19 @@ export function AgentPage() {
       </div>
       <div className="body">
         <section className={`view ${tab === "chat" ? "on" : ""}`}>
-          <ChatView agent={a} prefill={prefill} conversationId={conversationId} onConversationChange={changeConversation} />
+          <ChatView
+            agent={a}
+            prefill={prefill}
+            conversationId={conversationId}
+            onConversationChange={changeConversation}
+            onInspect={inspect}
+          />
+          <InspectDrawer
+            conversationId={conversationId}
+            open={inspecting}
+            onClose={() => setInspecting(false)}
+            focusExchangeId={focusExchange}
+          />
         </section>
         <section className={`view ${tab === "about" ? "on" : ""}`}>
           <AboutView
