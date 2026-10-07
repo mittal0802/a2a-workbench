@@ -28,6 +28,14 @@ registered agents as tools, so multi-agent flows can be tested conversationally.
    in Inspect, never in the way.
 4. **Local first.** `uvx a2a-workbench` or `docker run` gives a fully working
    instance on localhost with no account and no external services.
+5. **One core, three front-ends.** Everything lives in a UI-independent core
+   library. The web app, the CLI and the MCP server are thin layers over it, so
+   any feature available in the browser is also available to scripts, CI and
+   AI agents such as Claude Code.
+6. **Test the unhappy paths too.** Connection drops, timeouts, resets and
+   garbled responses are first-class test inputs, injected beneath the SDK, so
+   recovery behaviour such as `SubscribeToTask` after a dropped stream can be
+   verified deliberately rather than by luck.
 
 ### Non-goals (for v1)
 
@@ -45,7 +53,15 @@ registered agents as tools, so multi-agent flows can be tested conversationally.
 3. **Integrator.** Connects a third-party agent that needs OAuth, signs in
    through the browser flow, browses its skills, verifies it actually enforces
    the scopes it advertises.
-4. **Multi-agent tester.** Asks the Assistant "find me a compliant flight and
+4. **Resilience tester.** Turns on "drop the connection after 3 events" for a
+   long streaming task, watches the stream break, clicks **Resubscribe**, and
+   verifies the agent replays the current task state and continues; then runs
+   the Resilience health suite to check this for every binding.
+5. **AI agent as tester.** A developer asks Claude Code "test my A2A server on
+   localhost:9999". Claude calls `a2a-workbench check http://localhost:9999
+   --json` (or the MCP tools), reads the structured findings, and fixes the
+   server code, iterating until the suite passes.
+6. **Multi-agent tester.** Asks the Assistant "find me a compliant flight and
    file the expense"; watches it call Travel and Expenses agents, answer an
    `input_required` question, and retry after an extension error.
 
@@ -69,6 +85,7 @@ health checks.
 | I | Security | Schemes: API key (header/query/cookie), HTTP (Basic/Bearer), OAuth2, OpenID Connect, mTLS. OAuth flows: authorization code (+PKCE), client credentials, implicit, password, device code; `oauth2_metadata_url` discovery. `SecurityRequirement` AND/OR semantics at card and skill level. |
 | J | Extensions | Show declared extensions (uri, description, required, params); activate per request via `A2A-Extensions`; detect required-extension enforcement. |
 | K | Errors | All A2A errors (TaskNotFound, TaskNotCancelable, PushNotificationNotSupported, UnsupportedOperation, ContentTypeNotSupported, InvalidAgentResponse, ExtendedAgentCardNotConfigured, ExtensionSupportRequired, VersionNotSupported) plus JSON-RPC parse/request/method/params/internal, with correct per-binding mapping (JSON-RPC code, HTTP status, gRPC status). |
+| L | Resilience & failure handling | Client-side faults injected under the SDK: connection refused, DNS/TLS failure, connect/read timeout, slow responses, TCP reset, stream dropped after N events or N seconds, truncated/garbled bodies, HTTP 429/5xx, token expiry mid-stream. Verified recovery: `SubscribeToTask` after a dropped stream (current Task delivered first, then later events, nothing duplicated or lost); `GetTask` polling as a fallback; task keeps running when the client disconnects; terminal-state streams end correctly; retries with the same `message_id`; push delivery when the stream is gone. |
 
 ## 4. Architecture
 
@@ -96,22 +113,40 @@ directly, so there are no CORS problems and no secrets in the browser.
 **One process.** The server serves the built SPA as static files, the JSON API,
 the WebSocket and the webhook endpoints on one port (default `8484`).
 
+**Core vs. front-ends.** Every module in the diagram except `api/` belongs to
+`a2a_workbench.core` and has no FastAPI or web dependency. Three front-ends
+use it:
+
+```
+              ┌── api/   (FastAPI + WS) ──► web SPA
+ core ────────┼── cli/   (Typer)        ──► humans, scripts, CI
+              └── mcp/   (MCP stdio/HTTP) ─► Claude Code and other AI agents
+```
+
+The CLI and the MCP server run standalone, with no web server needed. They
+share the same state directory and database as the web app, so an agent
+registered from the CLI shows up in the UI, and a health run started by Claude
+can be opened in the browser.
+
 ### 4.1 Repository layout
 
 ```
 a2a-workbench/
 ├── server/                    # Python package `a2a_workbench` (uv)
 │   ├── a2a_workbench/
+│   │   ├── core/
+│   │   │   ├── registry/      # agent + workspace models/services
+│   │   │   ├── connection/    # SDK client building, interface selection, WireRecorder
+│   │   │   ├── faults/        # fault-injecting httpx transport + gRPC interceptor
+│   │   │   ├── conversations/ # send/stream, timeline normalization, artifact assembly
+│   │   │   ├── auth/          # vault, scheme handlers, OAuth flows, mTLS
+│   │   │   ├── push/          # webhook receiver, token validation, tunnel
+│   │   │   ├── health/        # check registry, passive + active suites, reports
+│   │   │   ├── assistant/     # LLM adapters, tool builder, run loop
+│   │   │   └── store/         # SQLAlchemy models, Alembic migrations
 │   │   ├── api/               # FastAPI routers, WS hub, schemas (pydantic)
-│   │   ├── registry/          # agent + workspace models/services
-│   │   ├── connection/        # SDK client building, interface selection, WireRecorder
-│   │   ├── conversations/     # send/stream, timeline normalization, artifact assembly
-│   │   ├── auth/              # vault, scheme handlers, OAuth flows, mTLS
-│   │   ├── push/              # webhook receiver, token validation, tunnel
-│   │   ├── health/            # check registry, passive + active suites, reports
-│   │   ├── assistant/         # LLM adapters, tool builder, run loop
-│   │   ├── store/             # SQLAlchemy models, Alembic migrations
-│   │   ├── cli.py             # `a2a-workbench serve|check`
+│   │   ├── cli/               # Typer app: every core operation as a command
+│   │   ├── mcp/               # MCP server exposing core operations as tools
 │   │   └── static/            # built SPA (generated, not committed)
 │   └── tests/
 ├── web/                       # React + TypeScript + Vite (pnpm)
@@ -156,7 +191,8 @@ a2a-workbench/
 - A **conversation** maps to one A2A `context_id` on one agent.
 - `send(conversation, parts, options)` calls `send_message` (streaming if the
   agent supports it and the option is on). Every SDK event is normalized into a
-  `TimelineEvent` (`message`, `task`, `status`, `artifact`, `push`, `error`) and
+  `TimelineEvent` (`message`, `task`, `status`, `artifact`, `push`, `error`,
+  `fault`, `connection_lost`, `recovered`) and
   pushed over the WS hub, then persisted.
 - **ArtifactAssembler** applies `append` / `last_chunk` to build complete
   artifacts while keeping each chunk for Inspect.
@@ -192,7 +228,7 @@ a2a-workbench/
 
 ### 5.5 `health/` — conformance engine
 
-- A **Check** has: `id`, `area` (A–K), `title`, `spec_ref`, `applies(card)`
+- A **Check** has: `id`, `area` (A–L), `title`, `spec_ref`, `applies(card)`
   (for example, skip streaming checks if `capabilities.streaming` is false, in
   which case the result is `not_supported` and it is not counted against the
   agent), `run(ctx) -> Result`, and a `fix_hint`.
@@ -207,9 +243,8 @@ a2a-workbench/
   excludes `not_supported`, and `error` (a Workbench-side failure) is shown
   separately and excluded. **Reports:**
   JSON (stable schema, versioned) and a self-contained HTML file.
-- **CLI:** `a2a-workbench check <url> [--interface jsonrpc|rest|grpc|all]
-  [--auth-file creds.json] [--format json|html] [--fail-on fail|warn]`. It uses
-  the same engine, with no server needed.
+- **CLI:** `a2a-workbench check` (see §5.9) runs the same engine with no
+  server needed.
 - **Safety:** active probes create real tasks. The UI warns before a run, and
   destructive probes (cancel, delete push config) only touch tasks the suite
   created itself.
@@ -230,7 +265,37 @@ a2a-workbench/
   budget. Each A2A call is a normal conversation, so "Open this conversation"
   shows it in Chat with full Inspect.
 
-### 5.7 `api/` and the web app
+### 5.7 `faults/` — failure injection and recovery
+
+- **Where:** beneath the SDK, through its own injection points:
+  `ClientConfig.httpx_client` gets an httpx client whose transport is a
+  `FaultTransport` wrapping the real one, and `ClientConfig.grpc_channel_factory`
+  returns a channel with a `FaultInterceptor`. The SDK still builds and parses
+  every A2A message; we only disturb the bytes and the connection.
+- **Fault profile** (JSON, also exposed in the UI and the CLI): a list of rules
+  `{match: {method?, binding?, nth_call?}, fault: <kind>, params}`. Kinds:
+  `refuse`, `dns_fail`, `tls_fail`, `connect_timeout`, `read_timeout`,
+  `delay(ms)`, `reset`, `drop_stream(after_events|after_ms)`,
+  `truncate(bytes)`, `garble`, `http_status(code, retry_after?)`,
+  `expire_token`. Rules can fire once, every time, or with a probability, and
+  the probability mode takes a seed so runs are reproducible.
+- **Recovery helpers:** after a drop, the timeline shows "Connection lost"
+  with **Resubscribe** (`SubscribeToTask`) and **Check status** (`GetTask`)
+  actions. An optional auto-recover policy (resubscribe with backoff) lets
+  users test the agent the way a real client would use it.
+- **Gap analysis on recovery:** the Workbench compares events seen before the
+  drop with what resubscribe delivers. It flags anything missing, duplicated
+  or out of order, and checks that the first event after resubscribing is the
+  current `Task`.
+- **UI:** a "Network conditions" section in the Options menu (presets: Stable,
+  Flaky stream, Slow agent, Offline, Custom profile) and a banner while a
+  profile is active. Every injected fault is labelled in Inspect, so it is
+  never mistaken for an agent bug.
+- **Agent-side faults** that cannot be injected from the client (for example
+  "the agent process restarts mid-task") are covered by `flaky-*` zoo agents
+  (§9) and documented as a manual recipe for users' own servers.
+
+### 5.8 `api/` and the web app
 
 - REST: `/api/agents`, `/api/agents/{id}/card`, `/api/conversations`,
   `/api/tasks`, `/api/push`, `/api/credentials`, `/api/health/runs`,
@@ -244,6 +309,52 @@ a2a-workbench/
 - Plain-language labels with the protocol name as secondary text (for example
   "Needs your input" with `input_required` in the tooltip and in Inspect).
 
+### 5.9 `cli/` and `mcp/` — for humans, CI and AI agents
+
+**CLI** (`a2a-workbench`, Typer). There is a command for every core operation,
+so anything the UI can do, a script or an agent can do too:
+
+```
+a2a-workbench serve                      # web UI on :8484
+a2a-workbench agents add|list|remove     # shared registry with the UI
+a2a-workbench card <url|agent> [--extended] [--verify]
+a2a-workbench send <agent> "text" [--file f] [--data json] [--stream]
+                   [--context-id …] [--task-id …] [--history-length N]
+                   [--accept text/plain,…] [--return-immediately]
+                   [--extension uri] [--metadata json] [--interface rest]
+a2a-workbench tasks get|list|cancel|subscribe …   # every filter as a flag
+a2a-workbench push create|get|list|delete …  ;  a2a-workbench push listen
+a2a-workbench auth login|status|logout <agent> [--scheme …] [--flow …]
+a2a-workbench check <url|agent> [--area A,F,L] [--interface all]
+                   [--faults profile.json] [--fail-on fail|warn]
+                   [--format json|html|text] [--out report.html]
+a2a-workbench faults presets|validate <profile.json>
+a2a-workbench fixtures [--zoo compliant-v1,broken-cancel]  # run test agents
+a2a-workbench mcp [--transport stdio|http]
+```
+
+**Agent-friendly contract:**
+- `--json` on every command gives one JSON document. Streaming commands emit
+  **NDJSON**, one event per line, in the same `TimelineEvent` shape the UI
+  uses.
+- **Stable exit codes:** 0 ok, 1 checks failed, 2 usage error, 3 connection
+  error, 4 auth error, 5 protocol error.
+- **Never interactive** when stdin is not a TTY or `--no-input` is set.
+  Credentials come from flags, env vars (`A2AW_AUTH_<AGENT>_…`) or
+  `--auth-file`. Interactive OAuth flows print the URL or device code and wait.
+- Findings carry `check_id`, `spec_ref`, `expected`, `actual`, `fix_hint` and
+  `exchange_ids`, so an AI agent can act on them without scraping text.
+- `a2a-workbench <cmd> --help` includes copy-pasteable examples.
+  `docs/agents.md` and a ready-made **Claude Code skill** show an AI agent how
+  to test a server and interpret the report.
+
+**MCP server** (`a2a-workbench mcp`, using the official `mcp` Python SDK).
+It exposes the same operations as tools for Claude Code, Claude Desktop and
+other MCP clients: `fetch_card`, `send_message`, `get_task`, `list_tasks`,
+`cancel_task`, `subscribe_task`, `push_*`, `run_health_check`,
+`get_exchange`, `list_findings`. Tool results return the structured JSON
+above. Long runs stream progress notifications.
+
 ## 6. Data model (SQLAlchemy)
 
 `workspace` (id, name). Local mode has one default workspace. All rows below
@@ -256,6 +367,7 @@ migrating data.
 - `conversation` (id, agent_id, context_id, title, origin = chat|assistant|health)
 - `task_snapshot` (agent_id, task_id, context_id, state, last_json, updated_at)
 - `timeline_event` (id, conversation_id, seq, kind, payload_json, exchange_id, ts)
+- `fault_profile` (id, name, rules_json, seed, builtin) — presets ship as builtin rows
 - `exchange` (id, agent_id, method, binding, request, response, frames, status, timing). Retention cap configurable (default 7 days or 5k rows).
 - `blob` (id, media_type, filename, bytes|path)
 - `push_hook` (id, agent_id, task_id, config_id, token_hash, auth_json)
@@ -296,6 +408,16 @@ migrating data.
     ignored filters, unclosed streams, bad chunks, unsigned card) so each
     health check is proven to **detect** the failure, not just pass on good
     servers
+  - `flaky-*`: server-side failures the client can't inject: the process
+    restarts mid-task (in-memory vs. persistent task store), slow or stalled
+    streams, resubscribe that replays the wrong state, push endpoint retries
+- **Fault-injection tests:** every fault kind is tested against
+  `compliant-v1` on every binding. This proves that recovery works (stream
+  dropped after N events, then resubscribe, then a complete and
+  de-duplicated timeline) and that each failure is reported in the right
+  class (transport, protocol or auth).
+- **CLI and MCP:** snapshot tests of `--json`/NDJSON output and exit codes,
+  plus an MCP client test that drives a full health run over stdio.
 - **Server:** pytest + pytest-asyncio. Unit tests per module, integration
   tests against the zoo, golden tests for report JSON.
 - **Web:** Vitest + Testing Library for components. Playwright E2E against the
@@ -323,21 +445,27 @@ standard reasoning/thought part) become extension proposals or discussions in
 
 ## 12. Phased delivery
 
-Each phase gets its own implementation plan and ends shippable.
+Each phase gets its own implementation plan and ends shippable. **Every
+phase delivers its features in all three surfaces:** core first, then the
+web UI, the CLI commands, and (from Phase 2) the MCP tools, each with tests.
 
 **Phase 1 — Foundation, connect, chat (JSON-RPC, v1.0)**
 Repo scaffold (uv + pnpm, lint, CI, Apache-2.0), single-process server
 serving the SPA, SQLite store, design tokens and app shell (sidebar, theme
 toggle). Connect flow (fetch card, verify signature, pick interface). About
 tab. Chat with send and stream, all Part types, `input_required` reply, stop
-task, and the Options menu. Inspect drawer with WireRecorder. Agent zoo:
-`compliant-v1` (JSON-RPC). Packaging: `uvx` and Docker.
+task, and the Options menu. Inspect drawer with WireRecorder. CLI: `serve`,
+`agents`, `card`, `send` (with NDJSON streaming), `--json` and exit codes.
+Agent zoo: `compliant-v1` (JSON-RPC). Packaging: `uvx` and Docker.
 
-**Phase 2 — Every binding and version**
+**Phase 2 — Every binding and version, tasks, and failure injection**
 REST and gRPC bindings, v0.3 compat, connection popover switching. Tasks tab
 (Get/List with every filter and pagination, Subscribe, Cancel). Extended card
-and diff. Extensions activation. Zoo: `compliant-v1` on all bindings,
-`legacy-v03`.
+and diff. Extensions activation. **Faults layer** (FaultTransport,
+FaultInterceptor, profiles and presets, Network conditions UI, "Connection
+lost → Resubscribe / Check status" with gap analysis). CLI: `tasks`,
+`--faults`, `faults`. **MCP server** with the tools available so far. Zoo:
+`compliant-v1` on all bindings, `legacy-v03`, `flaky-*`.
 
 **Phase 3 — Security**
 Vault, all schemes and all OAuth flows, OIDC, mTLS, requirement evaluator,
@@ -348,10 +476,11 @@ Push config CRUD, webhook receiver, token and auth validation, tunnel
 support, Notifications tab and inbox, push events in chat.
 
 **Phase 5 — Health**
-Check engine, passive checks in Inspect, active suites for areas A–K,
-cross-interface runs, Health tab and global Health checks page, JSON/HTML
-reports, `a2a-workbench check` CLI. Zoo: `broken-*` agents, with one or more
-per check.
+Check engine, passive checks in Inspect, active suites for areas A–L
+(including the Resilience suite, which runs fault profiles), cross-interface
+runs, Health tab and global Health checks page, JSON/HTML reports,
+`a2a-workbench check` CLI and the `run_health_check` MCP tool, `docs/agents.md`
+and the Claude Code skill. Zoo: `broken-*` agents, with one or more per check.
 
 **Phase 6 — Assistant**
 LLM adapters (Anthropic, then OpenAI + compatible, then Gemini), tool builder,
