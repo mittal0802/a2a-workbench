@@ -430,7 +430,7 @@ migrating data.
 
 - `uvx a2a-workbench` / `pipx install a2a-workbench` (PyPI wheel bundles the
   built SPA).
-- `docker run -p 8484:8484 ghcr.io/<owner>/a2a-workbench`. `docker-compose.yml`
+- `docker run -p 8484:8484 ghcr.io/mittal0802/a2a-workbench`. `docker-compose.yml`
   for Postgres and the hosted setup.
 - Config via env or `~/.a2a-workbench/config.toml`: `A2AW_HOST`, `A2AW_PORT`,
   `DATABASE_URL`, `A2AW_SECRET_KEY`, `PUBLIC_BASE_URL`, `A2AW_MODE=local|hosted`.
@@ -501,5 +501,5 @@ using `@a2a-js/sdk` as a second client.
    open-source repo, and the single public hosted instance is run by the
    project maintainers. That instance's sign-in method (for example GitHub
    OAuth) is decided in Phase 7.
-2. The GitHub repo lives under your personal account as `a2a-workbench`.
-   Commits should use your personal git identity, not your work one.
+2. The GitHub repo is `github.com/mittal0802/a2a-workbench`, and every
+   commit is authored as `Keshav Mittal <mittalkeshav41@gmail.com>`.

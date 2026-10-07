@@ -45,8 +45,12 @@ instead of working around it.
   messages, PR titles or descriptions, tags, release notes or code comments.
 - Commit with the repository's configured personal git identity. Never
   change `user.name` / `user.email`, and never pass `--author`.
-- This repo lives under the maintainer's personal GitHub account. Never push
-  to or reference any work or organization account or remote.
+- This repo lives under the personal GitHub account `mittal0802`
+  (`github.com/mittal0802/a2a-workbench`). The only allowed commit identity is
+  `Keshav Mittal <mittalkeshav41@gmail.com>`. Never push to or reference any
+  work or organization account or remote.
+- `.githooks/` enforces both rules; keep `git config core.hooksPath .githooks`
+  set and never bypass the hooks with `--no-verify`.
 
 ### 3. Docstrings describe the function, not its callers
 
