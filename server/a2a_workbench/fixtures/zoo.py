@@ -267,6 +267,7 @@ def build_zoo_app(
     grpc_port: int | None = None,
     legacy: bool = False,
     auth: str = "none",
+    idp: Any = None,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
@@ -279,7 +280,7 @@ def build_zoo_app(
     host = base_url.split("://", 1)[1].split(":", 1)[0]
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
     card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
-    schemes, requirements = security_for(auth)
+    schemes, requirements = security_for(auth, idp.issuer if idp else None)
     for name, scheme in schemes.items():
         card.security_schemes[name].CopyFrom(scheme)
     card.security_requirements.extend(requirements)
@@ -331,7 +332,7 @@ def build_zoo_app(
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         server = None
         if grpc_target:
-            server = grpc.aio.server(interceptors=[ZooGrpcAuthInterceptor(auth)])
+            server = grpc.aio.server(interceptors=[ZooGrpcAuthInterceptor(auth, idp)])
             if legacy:
                 a2a_v0_3_pb2_grpc.add_A2AServiceServicer_to_server(
                     CompatGrpcHandler(handler), server
@@ -347,5 +348,5 @@ def build_zoo_app(
                 await server.stop(grace=0)
 
     app = Starlette(routes=routes, lifespan=lifespan)
-    app.add_middleware(ZooAuthMiddleware, mode=auth)
+    app.add_middleware(ZooAuthMiddleware, mode=auth, idp=idp)
     return app

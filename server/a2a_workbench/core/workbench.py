@@ -27,7 +27,7 @@ class Workbench:
         self.exchanges = ExchangeStore(self.db, self.bus)
         self.blobs = BlobService(self.db, settings.max_blob_bytes)
         self.credentials = CredentialStore(self.db, Vault(load_vault_key(settings)))
-        self.auth = AuthService(self.credentials)
+        self.auth = AuthService(self.credentials, self.exchanges)
         self.agents = AgentService(self.db, self.exchanges, self.auth)
         self.conversations = ConversationService(
             self.db, self.bus, self.exchanges, self.blobs, self.auth

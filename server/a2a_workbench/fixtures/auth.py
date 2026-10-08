@@ -8,8 +8,15 @@ from typing import Any, Literal
 import grpc
 from a2a.types import (
     APIKeySecurityScheme,
+    AuthorizationCodeOAuthFlow,
+    ClientCredentialsOAuthFlow,
+    DeviceCodeOAuthFlow,
     HTTPAuthSecurityScheme,
+    ImplicitOAuthFlow,
     MutualTlsSecurityScheme,
+    OAuth2SecurityScheme,
+    OAuthFlows,
+    PasswordOAuthFlow,
     SecurityRequirement,
     SecurityScheme,
     StringList,
@@ -17,7 +24,15 @@ from a2a.types import (
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 ZooAuth = Literal[
-    "none", "apikey-header", "apikey-query", "apikey-cookie", "basic", "bearer", "and", "mtls"
+    "none",
+    "apikey-header",
+    "apikey-query",
+    "apikey-cookie",
+    "basic",
+    "bearer",
+    "and",
+    "mtls",
+    "oauth",
 ]
 ZOO_SECRETS = {
     "api_key": "zoo-api-key-1234",
@@ -67,10 +82,100 @@ CHECKS: dict[str, Check] = {
 }
 
 
-def security_for(mode: str) -> tuple[dict[str, SecurityScheme], list[SecurityRequirement]]:
-    """Return the security schemes and requirements a zoo agent in ``mode`` declares."""
+OAUTH_SCOPES = {
+    "a2a:invoke": "Invoke A2A methods",
+    "a2a:extended-card": "Fetch the extended agent card",
+    "booking.write": "Hold bookings",
+}
+
+
+def oauth_schemes(issuer: str) -> dict[str, SecurityScheme]:
+    """Return one OAuth2 scheme per flow of the mock provider at ``issuer``.
+
+    A2A's ``OAuthFlows`` holds exactly one flow, so each flow is its own scheme.
+    """
+    meta = f"{issuer}/.well-known/oauth-authorization-server"
+    token, authz = f"{issuer}/token", f"{issuer}/authorize"
+
+    def scheme(description: str, flows: OAuthFlows) -> SecurityScheme:
+        return SecurityScheme(
+            oauth2_security_scheme=OAuth2SecurityScheme(
+                description=description, flows=flows, oauth2_metadata_url=meta
+            )
+        )
+
+    return {
+        "oauth": scheme(
+            "Machine sign-in with a client id and secret.",
+            OAuthFlows(
+                client_credentials=ClientCredentialsOAuthFlow(token_url=token, scopes=OAUTH_SCOPES)
+            ),
+        ),
+        "oauthCode": scheme(
+            "Sign in through the mock provider's page.",
+            OAuthFlows(
+                authorization_code=AuthorizationCodeOAuthFlow(
+                    authorization_url=authz,
+                    token_url=token,
+                    scopes=OAUTH_SCOPES,
+                    pkce_required=True,
+                )
+            ),
+        ),
+        "oauthDevice": scheme(
+            "Sign in on another device with a code.",
+            OAuthFlows(
+                device_code=DeviceCodeOAuthFlow(
+                    device_authorization_url=f"{issuer}/device_authorization",
+                    token_url=token,
+                    scopes=OAUTH_SCOPES,
+                )
+            ),
+        ),
+        "oauthPassword": scheme(
+            "Username and password (deprecated flow).",
+            OAuthFlows(password=PasswordOAuthFlow(token_url=token, scopes=OAUTH_SCOPES)),
+        ),
+        "oauthImplicit": scheme(
+            "Browser sign-in returning the token directly (deprecated flow).",
+            OAuthFlows(implicit=ImplicitOAuthFlow(authorization_url=authz, scopes=OAUTH_SCOPES)),
+        ),
+    }
+
+
+def oauth_check(idp: Any) -> Check:
+    """Return a check accepting Bearer JWTs from ``idp`` that carry scope ``a2a:invoke``."""
+
+    def check(headers: dict[str, str], query: dict[str, str], cookies: dict[str, str]) -> bool:
+        auth = headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            return False
+        try:
+            claims = idp.verify(auth[7:])
+        except Exception:
+            return False
+        return "a2a:invoke" in str(claims.get("scope", "")).split()
+
+    return check
+
+
+def security_for(
+    mode: str, issuer: str | None = None
+) -> tuple[dict[str, SecurityScheme], list[SecurityRequirement]]:
+    """Return the security schemes and requirements a zoo agent in ``mode`` declares.
+
+    ``issuer`` is the mock identity provider's URL for ``oauth``.
+    """
     if mode == "none":
         return {}, []
+    if mode == "oauth":
+        if not issuer:
+            raise ValueError("oauth mode needs an identity provider")
+        schemes = oauth_schemes(issuer)
+        requirements = [
+            SecurityRequirement(schemes={name: StringList(list=["a2a:invoke"])}) for name in schemes
+        ]
+        return schemes, requirements
     schemes = {
         "apiKey": SecurityScheme(
             api_key_security_scheme=APIKeySecurityScheme(location="header", name="X-API-Key")
@@ -111,9 +216,9 @@ def _query(raw: bytes) -> dict[str, str]:
 class ZooAuthMiddleware:
     """Answers 401 to requests on the A2A endpoints that lack the mode's credentials."""
 
-    def __init__(self, app: ASGIApp, mode: str) -> None:
+    def __init__(self, app: ASGIApp, mode: str, idp: Any = None) -> None:
         self.app = app
-        self.check = CHECKS.get(mode)
+        self.check = oauth_check(idp) if mode == "oauth" else CHECKS.get(mode)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -143,8 +248,8 @@ class ZooAuthMiddleware:
 class ZooGrpcAuthInterceptor(grpc.aio.ServerInterceptor):
     """Rejects gRPC calls whose metadata lacks the mode's credentials."""
 
-    def __init__(self, mode: str) -> None:
-        self.check = CHECKS.get(mode)
+    def __init__(self, mode: str, idp: Any = None) -> None:
+        self.check = oauth_check(idp) if mode == "oauth" else CHECKS.get(mode)
 
     async def intercept_service(
         self,
