@@ -22,6 +22,7 @@ from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
+    AgentExtension,
     AgentInterface,
     AgentProvider,
     AgentSkill,
@@ -42,6 +43,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 KEY_ID = "zoo-1"
+ZOO_EXTENSION = "https://github.com/mittal0802/a2a-workbench/extensions/zoo-inspect/v1"
 PNG_1PX = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
@@ -192,7 +194,17 @@ def build_zoo_card(
                 url=f"{base_url}/v1", protocol_binding="HTTP+JSON", protocol_version="1.0"
             ),
         ],
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(
+            streaming=True,
+            extended_agent_card=protocol_version != "0.3",
+            extensions=[
+                AgentExtension(
+                    uri=ZOO_EXTENSION,
+                    description="Lists activated extensions in the inspect report",
+                    required=False,
+                )
+            ],
+        ),
         default_input_modes=["text/plain", "application/json", "image/png"],
         default_output_modes=["text/plain", "application/json", "image/png"],
         skills=[
@@ -260,8 +272,23 @@ def build_zoo_app(
         )
         card = signer(card)
 
+    extended = AgentCard()
+    extended.CopyFrom(card)
+    del extended.signatures[:]
+    extended.skills.append(
+        AgentSkill(
+            id="visa",
+            name="Visa check",
+            description="Only listed on the extended card.",
+            tags=["extended"],
+            examples=["echo visa"],
+        )
+    )
     handler = DefaultRequestHandlerV2(
-        agent_executor=ZooExecutor(), task_store=InMemoryTaskStore(), agent_card=card
+        agent_executor=ZooExecutor(),
+        task_store=InMemoryTaskStore(),
+        agent_card=card,
+        extended_agent_card=extended if card.capabilities.extended_agent_card else None,
     )
 
     async def jwks(_: Request) -> JSONResponse:

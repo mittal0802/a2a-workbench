@@ -49,6 +49,7 @@ class Agent(Base):
     base_url: Mapped[str] = mapped_column(String(2000))
     card_path: Mapped[str | None] = mapped_column(String(500), default=None)
     card: Mapped[dict[str, Any]]
+    extended_card: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     signature_status: Mapped[str] = mapped_column(String(20))
     signature_detail: Mapped[str | None] = mapped_column(String(1000), default=None)
     selected_interface_url: Mapped[str | None] = mapped_column(String(2000), default=None)

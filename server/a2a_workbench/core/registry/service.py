@@ -7,10 +7,18 @@ from a2a.types import AgentCard
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
-from a2a_workbench.core.a2a_json import card_from_json
-from a2a_workbench.core.connection.cards import SignatureStatus, fetch_card, split_card_url
+from a2a_workbench.core.a2a_json import card_from_json, to_json
+from a2a_workbench.core.connection.cards import (
+    SignatureStatus,
+    fetch_card,
+    fetch_extended_card,
+    split_card_url,
+)
 from a2a_workbench.core.connection.client import SUPPORTED_BINDINGS, select_interface
 from a2a_workbench.core.connection.recorder import ExchangeSink
+from a2a_workbench.core.conversations.errors import classify_error
+from a2a_workbench.core.errors import AgentCallError
+from a2a_workbench.core.registry.diff import card_diff
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import (
     DEFAULT_WORKSPACE_ID,
@@ -63,6 +71,14 @@ class CardPreview(BaseModel):
     signature_detail: str | None
     interfaces: list[InterfaceOut]
     default_interface_url: str | None
+    exchange_ids: list[str]
+
+
+class ExtendedCardOut(BaseModel):
+    """The extended card and how it differs from the public one."""
+
+    card: dict[str, Any]
+    diff: list[dict[str, Any]]
     exchange_ids: list[str]
 
 
@@ -256,3 +272,38 @@ class AgentService:
             row.selected_interface_url = url
             await session.commit()
             return _out(row)
+
+    async def get_extended_card(self, agent_id: str) -> ExtendedCardOut:
+        """Fetch the agent's extended card over its selected interface and store it.
+
+        Raises:
+            AgentNotFoundError: if the agent does not exist.
+            AgentCallError: if the card does not declare an extended card
+                (reason ``NOT_DECLARED``) or the call fails.
+        """
+        agent = await self.row(agent_id)
+        card = card_from_json(agent.card)
+        if not card.capabilities.extended_agent_card:
+            raise AgentCallError(
+                {
+                    "category": "workbench",
+                    "reason": "NOT_DECLARED",
+                    "message": "This agent's card does not declare an extended agent card.",
+                }
+            )
+        try:
+            iface = select_interface(card, agent.selected_interface_url)
+            extended, exchange_ids = await fetch_extended_card(
+                card, iface, self._sink, agent_id=agent_id
+            )
+        except Exception as exc:
+            raise AgentCallError(classify_error(exc)) from exc
+        extended_json = to_json(extended)
+        async with self._db.sessions() as session:
+            row = await session.get(Agent, agent_id)
+            if row is not None:
+                row.extended_card = extended_json
+                await session.commit()
+        return ExtendedCardOut(
+            card=extended_json, diff=card_diff(agent.card, extended_json), exchange_ids=exchange_ids
+        )

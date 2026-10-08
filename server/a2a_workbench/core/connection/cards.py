@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from a2a.client import A2ACardResolver
-from a2a.types import AgentCard
+from a2a.types import AgentCard, AgentInterface, GetExtendedAgentCardRequest
 from a2a.utils.signing import SignatureVerificationError, create_signature_verifier
 from jwt import PyJWKSet
 from jwt.exceptions import PyJWKError, PyJWTError
@@ -156,3 +156,20 @@ async def fetch_card(
                 ) from exc
             status, detail = await verify_card_signatures(card, http)
     return CardResult(card, to_json(card), status, detail, list(scope.exchange_ids))
+
+
+async def fetch_extended_card(
+    card: AgentCard,
+    iface: AgentInterface,
+    sink: ExchangeSink,
+    *,
+    agent_id: str | None = None,
+) -> tuple[AgentCard, list[str]]:
+    """Call GetExtendedAgentCard over ``iface``; return the card and the exchange ids."""
+    from a2a_workbench.core.connection.client import open_client
+
+    with recording_scope("get_extended_agent_card", agent_id=agent_id) as scope:
+        client = await open_client(card, iface, sink, streaming=False)
+        async with client:
+            extended = await client.get_extended_agent_card(GetExtendedAgentCardRequest())
+    return extended, list(scope.exchange_ids)
