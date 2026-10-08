@@ -143,3 +143,46 @@ async def test_cli_mcp_command_serves_over_stdio(tmp_path):
         names = {t.name for t in (await client.list_tools()).tools}
         presets = json.loads((await client.call_tool("fault_presets", {})).content[0].text)
     assert "send_message" in names and len(presets["presets"]) == 6
+
+
+async def test_subscribe_task_times_out_with_partial_events(zoo):
+    import time
+
+    async with connected() as mcp_client:
+        sent = await call(
+            mcp_client,
+            "send_message",
+            {
+                "agent": zoo.base_url,
+                "text": "stall 10",
+                "stream": False,
+                "return_immediately": True,
+            },
+        )
+        task_id = sent["events"][-1]["task_id"]
+        start = time.monotonic()
+        out = await call(
+            mcp_client,
+            "subscribe_task",
+            {"agent": zoo.base_url, "task_id": task_id, "timeout_s": 1},
+        )
+        assert time.monotonic() - start < 4
+        assert out["timed_out"] is True and out["events"][0]["kind"] == "task"
+
+
+async def test_send_message_times_out(zoo):
+    async with connected() as mcp_client:
+        out = await call(
+            mcp_client, "send_message", {"agent": zoo.base_url, "text": "stall 10", "timeout_s": 1}
+        )
+        assert out["timed_out"] is True and out["conversation_id"]
+
+
+async def test_send_message_unknown_conversation_returns_error(zoo):
+    async with connected() as mcp_client:
+        out = await call(
+            mcp_client,
+            "send_message",
+            {"agent": zoo.base_url, "text": "x", "conversation_id": "nope"},
+        )
+        assert out["error"]["category"] == "workbench"

@@ -137,6 +137,63 @@ class ConversationService:
             await session.commit()
         return _out(conv)
 
+    async def for_task(
+        self,
+        agent_id: str,
+        task_id: str,
+        *,
+        context_id: str | None = None,
+        state: str | None = None,
+    ) -> ConversationOut:
+        """Return the conversation that holds ``task_id``, creating one that adopts it if none does.
+
+        An adopting conversation starts with the given context and task state, so
+        it can resubscribe to the task.
+        """
+        async with self._db.sessions() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(Conversation)
+                        .where(Conversation.agent_id == agent_id, Conversation.task_id == task_id)
+                        .order_by(Conversation.updated_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if row is None:
+                conv_id = (
+                    (
+                        await session.execute(
+                            select(TimelineEventRow.conversation_id)
+                            .join(Conversation, Conversation.id == TimelineEventRow.conversation_id)
+                            .where(
+                                Conversation.agent_id == agent_id,
+                                TimelineEventRow.task_id == task_id,
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if conv_id is not None:
+                    row = await session.get(Conversation, conv_id)
+            if row is not None:
+                return _out(row)
+            conv = Conversation(
+                workspace_id=DEFAULT_WORKSPACE_ID,
+                agent_id=agent_id,
+                title=f"Task {task_id[:8]}",
+                origin="tasks",
+                context_id=context_id,
+                task_id=task_id,
+                task_state=state,
+            )
+            session.add(conv)
+            await session.commit()
+            return _out(conv)
+
     async def get(self, conversation_id: str) -> ConversationOut:
         """Return one conversation.
 

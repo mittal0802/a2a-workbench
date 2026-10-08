@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Avatar } from "../../components/Avatar";
@@ -19,6 +19,7 @@ const TABS = [
 export function AgentPage() {
   const { agentId = "", tab = "chat" } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => api.getAgent(agentId) });
   const [prefill, setPrefill] = useState<string | undefined>();
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -88,7 +89,14 @@ export function AgentPage() {
         </section>
         {tab === "tasks" && (
           <section className="view on">
-            <TasksView agent={a} />
+            <TasksView
+              agent={a}
+              onWatch={(id) => {
+                qc.invalidateQueries({ queryKey: ["conversations", a.id] });
+                setConversationId(id);
+                navigate(`/agents/${a.id}/chat`);
+              }}
+            />
           </section>
         )}
         <section className={`view ${tab === "about" ? "on" : ""}`}>

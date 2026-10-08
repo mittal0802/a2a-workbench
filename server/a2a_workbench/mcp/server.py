@@ -5,6 +5,7 @@ Every tool returns JSON. Failures are returned as ``{"error": {"category",
 being raised, so an agent can read and act on them.
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -140,17 +141,22 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         metadata: dict[str, Any] | None = None,
         conversation_id: str | None = None,
         faults: str | dict[str, Any] | None = None,
+        timeout_s: float = 120,
     ) -> dict[str, Any]:
         """Send a message to an agent (URL, id or name) and wait for the reply.
 
         Pass conversation_id from a previous result to continue that
         conversation (it answers an input_required question automatically).
         faults is a preset name (see fault_presets) or a profile object.
-        Returns conversation_id, every timeline event, final_state and error.
+        Waits at most timeout_s; on timeout returns the events so far with
+        timed_out=true (the task keeps running; use resubscribe to follow it).
+        Returns conversation_id, events, final_state, error and timed_out.
         """
         try:
             target = await resolve(agent)
             profile = _faults(faults)
+            if conversation_id:
+                await wb.conversations.get(conversation_id)
             conv_id = conversation_id or (await wb.conversations.create(target.id, origin="mcp")).id
         except Exception as exc:
             return _error(exc)
@@ -167,12 +173,23 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
             message_metadata=metadata,
             faults=profile,
         )
-        events = _events([e async for e in wb.conversations.send(conv_id, parts, options)])
+        collected: list[Any] = []
+        timed_out = False
+        try:
+            async with asyncio.timeout(timeout_s):
+                async for event in wb.conversations.send(conv_id, parts, options):
+                    collected.append(event)
+        except TimeoutError:
+            timed_out = True
+        except Exception as exc:
+            return {"conversation_id": conv_id, **_error(exc)}
+        events = _events(collected)
         return {
             "conversation_id": conv_id,
             "events": events,
             "final_state": _final_state(events),
             "error": _last_error(events),
+            "timed_out": timed_out,
         }
 
     @server.tool()
@@ -226,13 +243,23 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
             return _error(exc)
 
     @server.tool()
-    async def subscribe_task(agent: str, task_id: str) -> dict[str, Any]:
-        """Resubscribe to a running task (SubscribeToTask); return its events until it ends."""
+    async def subscribe_task(agent: str, task_id: str, timeout_s: float = 30) -> dict[str, Any]:
+        """Resubscribe to a running task (SubscribeToTask) and collect its events.
+
+        Stops at the end of the stream or after timeout_s, returning the events
+        so far with timed_out=true.
+        """
+        events: list[dict[str, Any]] = []
         try:
             agent_id = (await resolve(agent)).id
-            return {"events": [e async for e in wb.tasks.subscribe(agent_id, task_id)]}
+            async with asyncio.timeout(timeout_s):
+                async for e in wb.tasks.subscribe(agent_id, task_id):
+                    events.append(e)
+        except TimeoutError:
+            return {"events": events, "timed_out": True}
         except Exception as exc:
-            return _error(exc)
+            return {"events": events, **_error(exc)}
+        return {"events": events, "timed_out": False}
 
     @server.tool()
     async def resubscribe(conversation_id: str, force: bool = False) -> dict[str, Any]:

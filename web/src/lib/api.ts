@@ -90,6 +90,10 @@ export const api = {
   listTasks: (agentId: string, filter: TaskFilter) => call<TaskPage>(`/api/agents/${agentId}/tasks${query(filter)}`),
   getTask: (agentId: string, taskId: string, history_length?: number) =>
     call<A2ATask>(`/api/agents/${agentId}/tasks/${encodeURIComponent(taskId)}${query({ history_length })}`),
+  watchTask: (agentId: string, taskId: string) =>
+    call<{ conversation_id: string }>(`/api/agents/${agentId}/tasks/${encodeURIComponent(taskId)}/watch`, {
+      method: "POST",
+    }),
   cancelTask: (agentId: string, taskId: string) =>
     call<A2ATask>(`/api/agents/${agentId}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: "{}" }),
 };

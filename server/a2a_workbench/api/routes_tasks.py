@@ -1,8 +1,9 @@
 """Task endpoints."""
 
+import asyncio
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from a2a_workbench.api.deps import get_workbench
@@ -40,3 +41,24 @@ async def cancel_task(
     agent_id: str, task_id: str, body: CancelIn, wb: Workbench = Depends(get_workbench)
 ) -> dict[str, Any]:
     return await wb.tasks.cancel(agent_id, task_id, metadata=body.metadata)
+
+
+@router.post("/{task_id}/watch")
+async def watch_task(
+    agent_id: str, task_id: str, request: Request, wb: Workbench = Depends(get_workbench)
+) -> dict[str, str]:
+    """Attach the task to a conversation and resubscribe to it there."""
+    task = await wb.tasks.get(agent_id, task_id, history_length=0)
+    conv = await wb.conversations.for_task(
+        agent_id, task_id, context_id=task.get("contextId"), state=task["state"]
+    )
+
+    async def drain() -> None:
+        async for _ in wb.conversations.resubscribe(conv.id):
+            pass
+
+    tasks: set[asyncio.Task[None]] = request.app.state.tasks
+    job = asyncio.create_task(drain())
+    tasks.add(job)
+    job.add_done_callback(tasks.discard)
+    return {"conversation_id": conv.id}

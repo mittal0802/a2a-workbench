@@ -118,3 +118,30 @@ async def test_resubscribe_refused_while_a_stream_is_open(wb, conv):
     assert sum(1 for e in events if e.kind == "artifact") == 10
     stored = [e for e in await wb.conversations.events(conv.id) if e.kind == "artifact"]
     assert len(stored) == 10
+
+
+async def test_watch_task_adopts_it_into_a_conversation(wb, zoo):
+    agent = await wb.agents.add(zoo.base_url)
+    origin = await wb.conversations.create(agent.id)
+    await _send(wb, origin.id, "long", stream=False, return_immediately=True)
+    task_id = (await wb.conversations.get(origin.id)).task_id
+    found = await wb.conversations.for_task(agent.id, task_id)
+    assert found.id == origin.id
+    other_task = (
+        await wb.tasks.list(
+            agent.id,
+            __import__("a2a_workbench.core.tasks.service", fromlist=["x"]).ListTasksFilter(),
+        )
+    )["tasks"][0]
+    adopted = await wb.conversations.for_task(
+        agent.id, other_task["id"], context_id=other_task["contextId"], state=other_task["state"]
+    )
+    assert adopted.task_id == other_task["id"]
+
+
+async def test_watch_unknown_task_creates_adopting_conversation(wb, zoo):
+    agent = await wb.agents.add(zoo.base_url)
+    conv = await wb.conversations.for_task(agent.id, "t-123", context_id="ctx", state="working")
+    assert (conv.task_id, conv.context_id, conv.task_state) == ("t-123", "ctx", "working")
+    again = await wb.conversations.for_task(agent.id, "t-123")
+    assert again.id == conv.id

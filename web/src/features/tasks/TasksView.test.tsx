@@ -69,3 +69,20 @@ describe("TasksView", () => {
     expect(await screen.findByText("result of found it")).toBeInTheDocument();
   });
 });
+
+describe("TasksView watch live", () => {
+  it("attaches a running task to a conversation", async () => {
+    vi.spyOn(api, "listTasks").mockResolvedValue({ tasks: [task("t1", "working", "first")], next_page_token: null, page_size: 20, total_size: 1 });
+    const watch = vi.spyOn(api, "watchTask").mockResolvedValue({ conversation_id: "c9" });
+    const onWatch = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TasksView agent={agent} onWatch={onWatch} />
+      </QueryClientProvider>,
+    );
+    const row = (await screen.findByText("first")).closest("tr")!;
+    await userEvent.click(within(row).getByRole("button", { name: /watch live/i }));
+    expect(watch).toHaveBeenCalledWith("ag", "t1");
+    await vi.waitFor(() => expect(onWatch).toHaveBeenCalledWith("c9"));
+  });
+});

@@ -25,7 +25,7 @@ function ago(ts?: string): string {
 }
 
 /** All tasks of an agent (ListTasks) with every filter, pagination, details and stop. */
-export function TasksView({ agent }: { agent: Agent }) {
+export function TasksView({ agent, onWatch }: { agent: Agent; onWatch?: (conversationId: string) => void }) {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<TaskFilter>({ page_size: 20, history_length: 5 });
   const [extra, setExtra] = useState<A2ATask[]>([]);
@@ -52,6 +52,10 @@ export function TasksView({ agent }: { agent: Agent }) {
   const stop = useMutation({
     mutationFn: (taskId: string) => api.cancelTask(agent.id, taskId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks", agent.id] }),
+  });
+  const watch = useMutation({
+    mutationFn: (taskId: string) => api.watchTask(agent.id, taskId),
+    onSuccess: (r) => onWatch?.(r.conversation_id),
   });
   const find = useMutation({ mutationFn: (id: string) => api.getTask(agent.id, id), onSuccess: setOpen });
 
@@ -157,8 +161,8 @@ export function TasksView({ agent }: { agent: Agent }) {
             {tasks.length} of {first.data?.total_size ?? "?"} tasks
           </span>
         </div>
-        {(first.isError || find.isError || stop.isError) && (
-          <div className="err">{((first.error ?? find.error ?? stop.error) as Error).message}</div>
+        {(first.isError || find.isError || stop.isError || watch.isError) && (
+          <div className="err">{((first.error ?? find.error ?? stop.error ?? watch.error) as Error).message}</div>
         )}
         <div className="card">
           <table className="table">
@@ -187,6 +191,11 @@ export function TasksView({ agent }: { agent: Agent }) {
                     <button className="btn ghost" onClick={() => setOpen(t)}>
                       Open
                     </button>
+                    {RUNNING.has(t.state) && (
+                      <button className="btn ghost" onClick={() => watch.mutate(t.id)} title="SubscribeToTask">
+                        Watch live
+                      </button>
+                    )}
                     {RUNNING.has(t.state) && (
                       <button className="btn ghost" style={{ color: "var(--red)" }} onClick={() => stop.mutate(t.id)}>
                         Stop

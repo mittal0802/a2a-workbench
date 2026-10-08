@@ -42,3 +42,27 @@ def test_bad_status_filter_is_422(client, zoo):
         client.get(f"/api/agents/{agent['id']}/tasks", params={"status": "bogus"}).status_code
         == 422
     )
+
+
+def test_watch_task_resubscribes_in_a_conversation(client, zoo):
+    import time
+
+    agent = client.post("/api/agents", json={"url": zoo.base_url}).json()
+    conv = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
+    client.post(
+        f"/api/conversations/{conv['id']}/messages",
+        json={"parts": [{"kind": "text", "text": "long"}], "options": {"stream": False, "return_immediately": True}},
+    )
+    for _ in range(100):
+        task_id = client.get(f"/api/conversations/{conv['id']}").json()["conversation"]["task_id"]
+        if task_id:
+            break
+        time.sleep(0.05)
+    r = client.post(f"/api/agents/{agent['id']}/tasks/{task_id}/watch")
+    assert r.status_code == 200 and r.json()["conversation_id"] == conv["id"]
+    for _ in range(200):
+        events = client.get(f"/api/conversations/{conv['id']}").json()["events"]
+        if events and events[-1]["kind"] == "recovered":
+            break
+        time.sleep(0.05)
+    assert events[-1]["kind"] == "recovered" and events[-1]["data"]["state_after"] == "completed"
