@@ -10,7 +10,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from a2a_workbench import __version__
-from a2a_workbench.api import routes_agents, routes_conversations, routes_misc, ws
+from a2a_workbench.api import (
+    routes_agents,
+    routes_conversations,
+    routes_misc,
+    routes_tasks,
+    ws,
+)
 from a2a_workbench.api.errors import error_response, install_error_handlers
 from a2a_workbench.api.host_guard import HostGuardMiddleware, allowed_hosts
 from a2a_workbench.core.config import Settings
@@ -45,7 +51,7 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
         HostGuardMiddleware, hosts=allowed_hosts(settings.host, settings.extra_allowed_hosts)
     )
     install_error_handlers(app)
-    for module in (routes_misc, routes_agents, routes_conversations, ws):
+    for module in (routes_misc, routes_agents, routes_conversations, routes_tasks, ws):
         app.include_router(module.router)
     _mount_spa(app, static_dir)
     return app

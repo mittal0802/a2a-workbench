@@ -34,6 +34,8 @@ app = typer.Typer(
 )
 agents_app = typer.Typer(no_args_is_help=True, help="Manage registered agents.")
 app.add_typer(agents_app, name="agents")
+tasks_app = typer.Typer(no_args_is_help=True, help="Get, list, cancel and resubscribe to tasks.")
+app.add_typer(tasks_app, name="tasks")
 
 JsonFlag = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -309,6 +311,178 @@ def fixtures(
     base_url = f"http://{host}:{port}"
     typer.echo(f"Zoo agent at {base_url}", err=True)
     uvicorn.run(build_zoo_app(base_url, signed=not unsigned), host=host, port=port)
+
+
+async def _agent_id(wb: Workbench, target: str, as_json: bool) -> str:
+    return (await _resolve_or_register(wb, target, as_json)).id
+
+
+def _task_call_failed(exc: AgentCallError, as_json: bool) -> NoReturn:
+    c = exc.classified
+    if as_json:
+        print_json({"error": c})
+    else:
+        typer.echo(
+            f"error ({c['category']}): {c.get('reason') or ''} {c['message']}".strip(), err=True
+        )
+    raise typer.Exit(exit_code_for(c["category"]))
+
+
+def _task_line(t: dict[str, Any]) -> str:
+    history = t.get("history") or []
+    first = next(
+        (
+            p.get("text")
+            for m in history
+            if m.get("role") == "ROLE_USER"
+            for p in m.get("parts", [])
+            if p.get("text")
+        ),
+        "",
+    )
+    updated = t.get("status", {}).get("timestamp", "")
+    return f"{t['id']}  {t['state']:<15} {updated:<27} {first[:50]}"
+
+
+@tasks_app.command("list")
+def tasks_list(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    context_id: Annotated[str | None, typer.Option()] = None,
+    status: Annotated[str | None, typer.Option(help="e.g. working, completed")] = None,
+    updated_after: Annotated[
+        str | None, typer.Option(help="ISO-8601 time (status_timestamp_after).")
+    ] = None,
+    include_artifacts: Annotated[
+        bool | None, typer.Option("--include-artifacts/--no-include-artifacts")
+    ] = None,
+    history_length: Annotated[int | None, typer.Option(min=0)] = None,
+    page_size: Annotated[int | None, typer.Option(min=1)] = None,
+    page_token: Annotated[str | None, typer.Option()] = None,
+    all_pages: Annotated[
+        bool, typer.Option("--all", help="Follow next_page_token to the end.")
+    ] = False,
+    as_json: JsonFlag = False,
+) -> None:
+    """List tasks with every ListTasks filter."""
+    from datetime import datetime
+
+    from pydantic import ValidationError
+
+    from a2a_workbench.core.tasks.service import ListTasksFilter
+
+    try:
+        f = ListTasksFilter(
+            context_id=context_id,
+            status=status,
+            status_timestamp_after=datetime.fromisoformat(updated_after) if updated_after else None,
+            include_artifacts=include_artifacts,
+            history_length=history_length,
+            page_size=page_size,
+            page_token=page_token,
+        )
+    except (ValueError, ValidationError) as exc:
+        typer.echo(f"invalid filter: {exc}", err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+
+    async def go() -> dict[str, Any]:
+        async with Workbench.open(Settings()) as wb:
+            agent_id = await _agent_id(wb, target, as_json)
+            try:
+                page = await wb.tasks.list(agent_id, f)
+                tasks = list(page["tasks"])
+                while all_pages and page.get("next_page_token"):
+                    page = await wb.tasks.list(
+                        agent_id, f.model_copy(update={"page_token": page["next_page_token"]})
+                    )
+                    tasks += page["tasks"]
+            except AgentCallError as exc:
+                _task_call_failed(exc, as_json)
+            return {**page, "tasks": tasks}
+
+    result = _run(go())
+    if as_json:
+        print_json(result)
+        return
+    for t in result["tasks"]:
+        typer.echo(_task_line(t))
+    typer.echo(f"{len(result['tasks'])} of {result.get('total_size')} tasks", err=True)
+    if result.get("next_page_token") and not all_pages:
+        typer.echo(f"next page: --page-token {result['next_page_token']}", err=True)
+
+
+@tasks_app.command("get")
+def tasks_get(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: str,
+    history_length: Annotated[int | None, typer.Option(min=0)] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Get one task (GetTask)."""
+
+    async def go() -> dict[str, Any]:
+        async with Workbench.open(Settings()) as wb:
+            try:
+                return await wb.tasks.get(
+                    await _agent_id(wb, target, as_json), task_id, history_length=history_length
+                )
+            except AgentCallError as exc:
+                _task_call_failed(exc, as_json)
+
+    task = _run(go())
+    if as_json:
+        print_json(task)
+    else:
+        typer.echo(_task_line(task))
+        for artifact in task.get("artifacts", []):
+            typer.echo(f"  artifact {artifact.get('name') or artifact.get('artifactId')}")
+
+
+@tasks_app.command("cancel")
+def tasks_cancel(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: str,
+    metadata: Annotated[str | None, typer.Option(help="CancelTask metadata as JSON.")] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Cancel a task (CancelTask)."""
+    meta = _parse_json(metadata, "--metadata")
+
+    async def go() -> dict[str, Any]:
+        async with Workbench.open(Settings()) as wb:
+            try:
+                return await wb.tasks.cancel(
+                    await _agent_id(wb, target, as_json), task_id, metadata=meta
+                )
+            except AgentCallError as exc:
+                _task_call_failed(exc, as_json)
+
+    task = _run(go())
+    print_json(task) if as_json else typer.echo(_task_line(task))
+
+
+@tasks_app.command("subscribe")
+def tasks_subscribe(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: str,
+    as_json: JsonFlag = False,
+) -> None:
+    """Resubscribe to a task's event stream (SubscribeToTask); NDJSON with --json."""
+
+    async def go() -> None:
+        async with Workbench.open(Settings()) as wb:
+            agent_id = await _agent_id(wb, target, as_json)
+            try:
+                async for event in wb.tasks.subscribe(agent_id, task_id):
+                    if as_json:
+                        print_json(event)
+                    else:
+                        typer.echo(
+                            f"{event['kind']}{': ' + event['state'] if event['state'] else ''}"
+                        )
+            except AgentCallError as exc:
+                _task_call_failed(exc, as_json)
+
+    _run(go())
 
 
 def main() -> None:

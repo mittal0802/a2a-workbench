@@ -13,7 +13,7 @@ from a2a.types import (
     SubscribeToTaskRequest,
     TaskState,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from a2a_workbench.core.a2a_json import card_from_json, state_name, to_json
 from a2a_workbench.core.connection.client import open_client, select_interface
@@ -41,6 +41,13 @@ class ListTasksFilter(BaseModel):
     history_length: int | None = Field(default=None, ge=0)
     page_size: int | None = Field(default=None, ge=1)
     page_token: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _known_state(cls, value: str | None) -> str | None:
+        if value is not None and f"TASK_STATE_{value.upper()}" not in TaskState.keys():
+            raise ValueError(f"unknown task state '{value}'")
+        return value
 
 
 def _task_json(task: Any) -> dict[str, Any]:
