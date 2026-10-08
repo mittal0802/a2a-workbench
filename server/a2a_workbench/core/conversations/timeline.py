@@ -9,7 +9,16 @@ from pydantic import BaseModel, Field
 from a2a_workbench.core.a2a_json import state_name, to_json
 from a2a_workbench.core.conversations.artifacts import ArtifactAssembler
 
-EventKind = Literal["user_message", "message", "task", "status", "artifact", "error"]
+EventKind = Literal[
+    "user_message",
+    "message",
+    "task",
+    "status",
+    "artifact",
+    "error",
+    "connection_lost",
+    "recovered",
+]
 
 
 class TimelineEvent(BaseModel):

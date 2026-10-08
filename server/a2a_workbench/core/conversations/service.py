@@ -6,7 +6,14 @@ from collections import defaultdict
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 
-from a2a.types import CancelTaskRequest, Message, Role, StreamResponse
+from a2a.types import (
+    CancelTaskRequest,
+    GetTaskRequest,
+    Message,
+    Role,
+    StreamResponse,
+    SubscribeToTaskRequest,
+)
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -22,6 +29,7 @@ from a2a_workbench.core.connection.client import open_client, select_interface
 from a2a_workbench.core.connection.recorder import ExchangeSink, RecordingScope, recording_scope
 from a2a_workbench.core.conversations.artifacts import ArtifactAssembler
 from a2a_workbench.core.conversations.errors import classify_error
+from a2a_workbench.core.conversations.gaps import analyze_recovery
 from a2a_workbench.core.conversations.options import (
     SendOptions,
     build_call_context,
@@ -29,6 +37,7 @@ from a2a_workbench.core.conversations.options import (
 )
 from a2a_workbench.core.conversations.parts import AnyPartInput, build_part
 from a2a_workbench.core.conversations.timeline import TimelineEvent, event_from_stream_response
+from a2a_workbench.core.faults.profile import FaultProfile
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import (
     DEFAULT_WORKSPACE_ID,
@@ -214,6 +223,153 @@ class ConversationService:
             )
         )
 
+    async def _failure(
+        self,
+        conversation_id: str,
+        exc: BaseException,
+        task_id: str | None,
+        last_state: str | None,
+        exchange_id: str | None,
+    ) -> TimelineEvent:
+        classified = classify_error(exc)
+        open_task = last_state not in TERMINAL_STATES | INTERRUPTED_STATES
+        if classified["category"] == "transport" and task_id and last_state and open_task:
+            return await self._emit(
+                TimelineEvent(
+                    conversation_id=conversation_id,
+                    kind="connection_lost",
+                    task_id=task_id,
+                    exchange_id=exchange_id,
+                    data={**classified, "task_id": task_id, "last_state": last_state},
+                )
+            )
+        return await self._emit(
+            TimelineEvent(
+                conversation_id=conversation_id,
+                kind="error",
+                task_id=task_id,
+                exchange_id=exchange_id,
+                data=classified,
+            )
+        )
+
+    async def _task_events(self, conversation_id: str, task_id: str) -> list[TimelineEvent]:
+        return [e for e in await self.events(conversation_id) if e.task_id == task_id]
+
+    async def resubscribe(
+        self, conversation_id: str, *, faults: FaultProfile | None = None, force: bool = False
+    ) -> AsyncIterator[TimelineEvent]:
+        """Resubscribe to the conversation's task (SubscribeToTask) and yield its events.
+
+        Ends with a ``recovered`` event holding the gap analysis. Tasks already
+        in a terminal state are refused locally unless ``force`` is set, in
+        which case the agent's own answer is reported.
+        """
+        conv, agent = await self._load(conversation_id)
+        if not conv.task_id or (conv.task_state in TERMINAL_STATES and not force):
+            reason = (
+                "There is no task to resubscribe to."
+                if not conv.task_id
+                else f"The task already finished ({conv.task_state})."
+            )
+            yield await self._emit(
+                TimelineEvent(
+                    conversation_id=conversation_id,
+                    kind="error",
+                    task_id=conv.task_id,
+                    data={"category": "workbench", "message": reason},
+                )
+            )
+            return
+        task_id = conv.task_id
+        before = await self._task_events(conversation_id, task_id)
+        card = card_from_json(agent.card)
+        assembler = ArtifactAssembler()
+        after: list[TimelineEvent] = []
+        state = conv.task_state
+        with recording_scope(
+            "subscribe_task", agent_id=agent.id, conversation_id=conversation_id
+        ) as scope:
+            try:
+                iface = select_interface(card, agent.selected_interface_url)
+                client = await open_client(card, iface, self._sink, streaming=True, faults=faults)
+                async with client:
+                    async for resp in client.subscribe(SubscribeToTaskRequest(id=task_id)):
+                        event = await self._emit(
+                            event_from_stream_response(
+                                resp,
+                                conversation_id=conversation_id,
+                                assembler=assembler,
+                                exchange_id=_last_exchange(scope),
+                            )
+                        )
+                        state = event.data.get("state", state)
+                        after.append(event)
+                        yield event
+            except Exception as exc:
+                yield await self._failure(
+                    conversation_id, exc, task_id, state, _last_exchange(scope)
+                )
+                return
+        yield await self._emit(
+            TimelineEvent(
+                conversation_id=conversation_id,
+                kind="recovered",
+                task_id=task_id,
+                exchange_id=_last_exchange(scope),
+                data=analyze_recovery(before, after, "subscribe"),
+            )
+        )
+
+    async def check_status(
+        self, conversation_id: str, *, faults: FaultProfile | None = None
+    ) -> AsyncIterator[TimelineEvent]:
+        """Fetch the conversation's task (GetTask), yield it, then a ``recovered`` summary."""
+        conv, agent = await self._load(conversation_id)
+        if not conv.task_id:
+            yield await self._emit(
+                TimelineEvent(
+                    conversation_id=conversation_id,
+                    kind="error",
+                    data={"category": "workbench", "message": "There is no task to check."},
+                )
+            )
+            return
+        task_id = conv.task_id
+        before = await self._task_events(conversation_id, task_id)
+        card = card_from_json(agent.card)
+        with recording_scope(
+            "get_task", agent_id=agent.id, conversation_id=conversation_id
+        ) as scope:
+            try:
+                iface = select_interface(card, agent.selected_interface_url)
+                client = await open_client(card, iface, self._sink, streaming=False, faults=faults)
+                async with client:
+                    task = await client.get_task(GetTaskRequest(id=task_id))
+            except Exception as exc:
+                yield await self._failure(
+                    conversation_id, exc, task_id, conv.task_state, _last_exchange(scope)
+                )
+                return
+        event = await self._emit(
+            event_from_stream_response(
+                StreamResponse(task=task),
+                conversation_id=conversation_id,
+                assembler=ArtifactAssembler(),
+                exchange_id=_last_exchange(scope),
+            )
+        )
+        yield event
+        yield await self._emit(
+            TimelineEvent(
+                conversation_id=conversation_id,
+                kind="recovered",
+                task_id=task_id,
+                exchange_id=_last_exchange(scope),
+                data=analyze_recovery(before, [event], "get_task"),
+            )
+        )
+
     async def _load(self, conversation_id: str) -> tuple[Conversation, Agent]:
         async with self._db.sessions() as session:
             conv = await session.get(Conversation, conversation_id)
@@ -268,17 +424,20 @@ class ConversationService:
         with recording_scope(
             "send_message", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            seen_task, seen_state = task_id, None
             try:
                 iface = select_interface(
                     card, options.interface_url or agent.selected_interface_url
                 )
-                client = await open_client(card, iface, self._sink, streaming=options.stream)
+                client = await open_client(
+                    card, iface, self._sink, streaming=options.stream, faults=options.faults
+                )
                 async with client:
                     stream = client.send_message(
                         build_request(message, options), context=build_call_context(options)
                     )
                     async for resp in stream:
-                        yield await self._emit(
+                        event = await self._emit(
                             event_from_stream_response(
                                 resp,
                                 conversation_id=conversation_id,
@@ -286,9 +445,12 @@ class ConversationService:
                                 exchange_id=_last_exchange(scope),
                             )
                         )
+                        seen_task = event.task_id or seen_task
+                        seen_state = event.data.get("state", seen_state)
+                        yield event
             except Exception as exc:
-                yield await self._error(
-                    conversation_id, exc, task_id=task_id, exchange_id=_last_exchange(scope)
+                yield await self._failure(
+                    conversation_id, exc, seen_task, seen_state, _last_exchange(scope)
                 )
 
     async def cancel(self, conversation_id: str) -> AsyncIterator[TimelineEvent]:

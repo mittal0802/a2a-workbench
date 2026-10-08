@@ -7,6 +7,8 @@ from a2a.client.service_parameters import ServiceParametersFactory, with_a2a_ext
 from a2a.types import Message, SendMessageConfiguration, SendMessageRequest
 from pydantic import BaseModel, Field
 
+from a2a_workbench.core.faults.profile import FaultProfile
+
 
 class SendOptions(BaseModel):
     """Every client-controllable aspect of a SendMessage / SendStreamingMessage call."""
@@ -22,6 +24,7 @@ class SendOptions(BaseModel):
     task_id: str | None = None
     context_id: str | None = None
     interface_url: str | None = None
+    faults: FaultProfile | None = None
 
 
 def build_request(message: Message, options: SendOptions) -> SendMessageRequest:
