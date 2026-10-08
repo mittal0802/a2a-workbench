@@ -31,6 +31,10 @@ class _FaultStream(httpx.AsyncByteStream):
                     break
                 yield chunk[:remaining]
                 remaining -= len(chunk)
+            if remaining <= 0:
+                raise httpx.RemoteProtocolError(
+                    f"[injected] connection closed after {params['bytes']} bytes (incomplete body)"
+                )
             return
         if kind == "garble":
             async for chunk in self._inner:

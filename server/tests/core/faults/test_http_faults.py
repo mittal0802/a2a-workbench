@@ -71,8 +71,13 @@ async def test_http_status_short_circuits():
 
 
 async def test_truncate_and_garble_change_bytes():
+    got = b""
     async with _client(FaultRule(kind="truncate", params={"bytes": 4})) as c:
-        assert len((await c.get("http://x/")).content) == 4
+        with pytest.raises(httpx.RemoteProtocolError):
+            async with c.stream("GET", "http://x/") as r:
+                async for chunk in r.aiter_raw():
+                    got += chunk
+    assert len(got) == 4
     async with _client(FaultRule(kind="garble")) as c:
         body = (await c.get("http://x/")).content
     assert body != SSE and len(body) == len(SSE)

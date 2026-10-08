@@ -48,6 +48,7 @@ from a2a_workbench.core.store.models import (
 )
 
 DEFAULT_TITLE = "New conversation"
+OPEN_STATES = frozenset({"submitted", "working"})
 
 
 class ConversationNotFoundError(LookupError):
@@ -255,6 +256,24 @@ class ConversationService:
             )
         )
 
+    async def _stream_ended(
+        self, conversation_id: str, task_id: str, last_state: str, exchange_id: str | None
+    ) -> TimelineEvent:
+        return await self._emit(
+            TimelineEvent(
+                conversation_id=conversation_id,
+                kind="connection_lost",
+                task_id=task_id,
+                exchange_id=exchange_id,
+                data={
+                    "category": "transport",
+                    "message": "The stream ended before the task finished",
+                    "task_id": task_id,
+                    "last_state": last_state,
+                },
+            )
+        )
+
     async def _task_events(self, conversation_id: str, task_id: str) -> list[TimelineEvent]:
         return [e for e in await self.events(conversation_id) if e.task_id == task_id]
 
@@ -319,6 +338,9 @@ class ConversationService:
                     conversation_id, exc, task_id, state, _last_exchange(scope)
                 )
                 return
+        if state in OPEN_STATES:
+            yield await self._stream_ended(conversation_id, task_id, state, _last_exchange(scope))
+            return
         yield await self._emit(
             TimelineEvent(
                 conversation_id=conversation_id,
@@ -438,7 +460,7 @@ class ConversationService:
         with recording_scope(
             "send_message", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
-            seen_task, seen_state = task_id, None
+            seen_task, seen_state, received = task_id, None, 0
             try:
                 iface = select_interface(
                     card, options.interface_url or agent.selected_interface_url
@@ -465,10 +487,30 @@ class ConversationService:
                         )
                         seen_task = event.task_id or seen_task
                         seen_state = event.data.get("state", seen_state)
+                        received += 1
                         yield event
             except Exception as exc:
                 yield await self._failure(
                     conversation_id, exc, seen_task, seen_state, _last_exchange(scope)
+                )
+                return
+            streamed = options.stream and card.capabilities.streaming
+            if received == 0:
+                yield await self._emit(
+                    TimelineEvent(
+                        conversation_id=conversation_id,
+                        kind="error",
+                        task_id=task_id,
+                        exchange_id=_last_exchange(scope),
+                        data={
+                            "category": "protocol",
+                            "message": "The agent's response ended without a readable A2A event",
+                        },
+                    )
+                )
+            elif streamed and seen_task and seen_state in OPEN_STATES:
+                yield await self._stream_ended(
+                    conversation_id, seen_task, seen_state, _last_exchange(scope)
                 )
 
     async def cancel(self, conversation_id: str) -> AsyncIterator[TimelineEvent]:

@@ -74,3 +74,31 @@ async def test_resubscribe_on_finished_task_reports_protocol_error(wb, conv):
     await _send(wb, conv.id, "echo done")
     after = [e async for e in wb.conversations.resubscribe(conv.id, force=True)]
     assert after[-1].kind == "error" and after[-1].data["category"] == "protocol"
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"kind": "truncate", "params": {"bytes": 1500}},
+        {"kind": "truncate", "params": {"bytes": 10}},
+        {"kind": "garble"},
+    ],
+)
+async def test_byte_faults_on_streams_are_never_silent(wb, conv, rule):
+    events = await _send(wb, conv.id, "long", faults=FaultProfile(rules=[rule]))
+    assert events[-1].kind in {"error", "connection_lost"}
+
+
+async def test_stream_that_ends_early_is_connection_lost(wb, conv):
+    events = await _send(
+        wb,
+        conv.id,
+        "long",
+        faults=FaultProfile(rules=[{"kind": "truncate", "params": {"bytes": 1500}}]),
+    )
+    assert events[-1].kind == "connection_lost"
+
+
+async def test_non_streaming_return_immediately_is_not_connection_lost(wb, conv):
+    events = await _send(wb, conv.id, "slow 2", stream=False, return_immediately=True)
+    assert events[-1].kind == "task"
