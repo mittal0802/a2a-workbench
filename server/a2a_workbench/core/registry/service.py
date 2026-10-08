@@ -111,13 +111,14 @@ class AgentService:
         self._db = db
         self._sink = sink
 
-    async def preview(self, url: str) -> CardPreview:
-        """Fetch and verify the card at ``url`` without registering it.
+    async def preview(self, url: str, card_path: str | None = None) -> CardPreview:
+        """Fetch and verify the card at ``url`` (or ``url`` + ``card_path``) without
+        registering it.
 
         Raises:
             CardFetchError: if the card cannot be loaded.
         """
-        result = await fetch_card(url, self._sink)
+        result = await fetch_card(url, self._sink, card_path=card_path)
         return CardPreview(
             card=result.card_json,
             signature_status=result.signature_status,

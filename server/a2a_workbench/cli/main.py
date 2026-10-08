@@ -150,13 +150,14 @@ def card(
 
     async def go() -> None:
         async with Workbench.open(Settings()) as wb:
-            url = target
+            url, card_path = target, None
             try:
-                url = (await wb.agents.resolve(target)).base_url
+                agent = await wb.agents.resolve(target)
+                url, card_path = agent.base_url, agent.card_path
             except AgentNotFoundError:
                 pass
             try:
-                preview = await wb.agents.preview(url)
+                preview = await wb.agents.preview(url, card_path)
             except CardFetchError as exc:
                 _card_failure(exc, as_json)
         if as_json:

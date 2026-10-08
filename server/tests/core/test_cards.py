@@ -80,3 +80,17 @@ async def test_fetch_card_unreachable_raises_card_error():
 async def test_fetch_card_404_raises_card_error(zoo):
     with pytest.raises(CardFetchError):
         await fetch_card(f"{zoo.base_url}/nope/card.json", Sink())
+
+
+def test_split_card_url_without_scheme_uses_http_for_local_hosts():
+    assert split_card_url("localhost:9999") == ("http://localhost:9999", None)
+    assert split_card_url("127.0.0.1:9999/card.json") == ("http://127.0.0.1:9999", "/card.json")
+
+
+def test_split_card_url_without_scheme_uses_https_for_public_hosts():
+    assert split_card_url("agent.example.com") == ("https://agent.example.com", None)
+
+
+async def test_fetch_card_at_custom_path(custom_path_zoo):
+    result = await fetch_card(f"{custom_path_zoo.base_url}/agents/zoo/card.json", Sink())
+    assert result.card.name == "Zoo agent"

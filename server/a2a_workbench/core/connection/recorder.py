@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -83,6 +84,43 @@ def recording_scope(
         yield scope
     finally:
         _current_scope.reset(token)
+
+
+SENSITIVE_QUERY_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "api-key",
+        "key",
+        "token",
+        "access_token",
+        "id_token",
+        "refresh_token",
+        "password",
+        "passwd",
+        "secret",
+        "client_secret",
+        "code",
+        "sig",
+        "signature",
+    }
+)
+
+
+def redact_url(url: str) -> str:
+    """Return ``url`` with user info and credential-like query values masked."""
+    parts = urlsplit(url)
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = f"{REDACTED}@{netloc.rsplit('@', 1)[1]}"
+    query = parts.query
+    if query:
+        pairs = parse_qsl(query, keep_blank_values=True)
+        query = urlencode(
+            [(k, REDACTED if k.lower() in SENSITIVE_QUERY_KEYS else v) for k, v in pairs],
+            safe=REDACTED,
+        )
+    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
 
 
 def redact_headers(headers: httpx.Headers) -> dict[str, str]:
@@ -221,7 +259,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             id=uuid.uuid4().hex,
             operation=scope.operation if scope else "http",
             http_method=request.method,
-            url=str(request.url),
+            url=redact_url(str(request.url)),
             started_at=datetime.now(UTC),
             request_headers=redact_headers(request.headers),
             request_body=self._request_body(request),

@@ -209,8 +209,10 @@ def build_zoo_card(base_url: str) -> AgentCard:
     )
 
 
-def build_zoo_app(base_url: str, *, signed: bool = True) -> Starlette:
-    """Return an ASGI app serving the zoo agent, its card and its JWKS."""
+def build_zoo_app(
+    base_url: str, *, signed: bool = True, card_path: str = "/.well-known/agent-card.json"
+) -> Starlette:
+    """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS."""
     card = build_zoo_card(base_url)
     private_key = ec.generate_private_key(ec.SECP256R1())
     jwk = json.loads(ECAlgorithm.to_jwk(private_key.public_key()))
@@ -235,7 +237,7 @@ def build_zoo_app(base_url: str, *, signed: bool = True) -> Starlette:
         return JSONResponse({"keys": [jwk]})
 
     routes = [
-        *create_agent_card_routes(card),
+        *create_agent_card_routes(card, card_url=card_path),
         Route("/.well-known/jwks.json", jwks),
         *create_jsonrpc_routes(handler, "/a2a"),
         *create_rest_routes(handler, path_prefix="/v1"),

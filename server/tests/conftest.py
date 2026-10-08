@@ -22,3 +22,11 @@ def unsigned_zoo():
 
     with ZooServer(signed=False) as server:
         yield server
+
+
+@pytest.fixture(scope="session")
+def custom_path_zoo():
+    from a2a_workbench.fixtures.runner import ZooServer
+
+    with ZooServer(card_path="/agents/zoo/card.json") as server:
+        yield server

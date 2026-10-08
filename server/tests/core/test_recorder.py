@@ -191,3 +191,12 @@ async def test_stream_is_announced_at_start_and_completed_at_close():
             async for _ in r.aiter_bytes():
                 pass
     assert snapshots[-1] == (True, 2, 200)
+
+
+async def test_credentials_in_urls_are_redacted():
+    sink = Collector()
+    async with _client(lambda r: httpx.Response(204), sink) as c:
+        await c.get("http://user:pw@x/a?api_key=SECRET&page=2&access_token=T0K")
+    url = sink.items[0].url
+    assert "pw" not in url and "SECRET" not in url and "T0K" not in url
+    assert "page=2" in url and "user" not in url

@@ -51,6 +51,20 @@ class CardResult:
     exchange_ids: list[str] = field(default_factory=list)
 
 
+_LOCAL_PREFIXES = ("localhost", "127.", "0.0.0.0", "[::1]", "::1")
+
+
+def with_scheme(url: str) -> str:
+    """Return ``url`` stripped, prefixed with ``http://`` for local hosts or ``https://``
+    for others when it has no scheme."""
+    url = url.strip()
+    if "://" in url:
+        return url
+    host = url.split("/", 1)[0].lower()
+    local = host.startswith(_LOCAL_PREFIXES) or host.split(":", 1)[0].endswith(".local")
+    return ("http://" if local else "https://") + url
+
+
 def split_card_url(url: str) -> tuple[str, str | None]:
     """Split a user-supplied URL into ``(base_url, card_path)``.
 
@@ -58,7 +72,7 @@ def split_card_url(url: str) -> tuple[str, str | None]:
     any other URL is the agent's base URL and the card path is left to the SDK
     default.
     """
-    parts = urlsplit(url.strip())
+    parts = urlsplit(with_scheme(url))
     if parts.path.endswith(".json"):
         origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
         return origin, parts.path + (f"?{parts.query}" if parts.query else "")

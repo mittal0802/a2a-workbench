@@ -23,12 +23,18 @@ class ZooServer:
     """Serves the zoo agent with uvicorn in a daemon thread while the context is open."""
 
     def __init__(
-        self, *, signed: bool = True, host: str = "127.0.0.1", port: int | None = None
+        self,
+        *,
+        signed: bool = True,
+        host: str = "127.0.0.1",
+        port: int | None = None,
+        card_path: str = "/.well-known/agent-card.json",
     ) -> None:
         self.host = host
         self.port = port or free_port(host)
         self.base_url = f"http://{host}:{self.port}"
-        app = build_zoo_app(self.base_url, signed=signed)
+        self.card_path = card_path
+        app = build_zoo_app(self.base_url, signed=signed, card_path=card_path)
         self._server = uvicorn.Server(
             uvicorn.Config(app, host=host, port=self.port, log_level="warning", lifespan="off")
         )
@@ -40,7 +46,7 @@ class ZooServer:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                httpx.get(f"{self.base_url}/.well-known/agent-card.json", timeout=0.5)
+                httpx.get(f"{self.base_url}{self.card_path}", timeout=0.5)
                 return
             except httpx.TransportError:
                 time.sleep(0.05)

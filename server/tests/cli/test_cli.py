@@ -128,3 +128,11 @@ def test_human_output_prints_streamed_artifact_once(zoo):
 def test_human_output_shows_status_message_of_task_snapshot(zoo):
     r = runner.invoke(app, ["send", zoo.base_url, "fail", "--no-stream"])
     assert "Something went wrong." in r.stdout
+
+
+def test_card_of_registered_agent_uses_its_card_path(custom_path_zoo):
+    url = f"{custom_path_zoo.base_url}/agents/zoo/card.json"
+    assert runner.invoke(app, ["agents", "add", url]).exit_code == 0
+    r = runner.invoke(app, ["card", "Zoo agent", "--json"])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.stdout)["card"]["name"] == "Zoo agent"
