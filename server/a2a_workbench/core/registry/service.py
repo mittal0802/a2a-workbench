@@ -55,6 +55,7 @@ class AgentOut(BaseModel):
     base_url: str
     card_path: str | None
     card: dict[str, Any]
+    extended_card: dict[str, Any] | None = None
     signature_status: str
     signature_detail: str | None
     selected_interface_url: str | None
@@ -111,6 +112,7 @@ def _out(agent: Agent) -> AgentOut:
         base_url=agent.base_url,
         card_path=agent.card_path,
         card=agent.card,
+        extended_card=agent.extended_card,
         signature_status=agent.signature_status,
         signature_detail=agent.signature_detail,
         selected_interface_url=agent.selected_interface_url,
@@ -282,7 +284,30 @@ class AgentService:
                 (reason ``NOT_DECLARED``) or the call fails.
         """
         agent = await self.row(agent_id)
-        card = card_from_json(agent.card)
+        out = await self._extended(agent.card, agent.selected_interface_url, agent_id)
+        async with self._db.sessions() as session:
+            row = await session.get(Agent, agent_id)
+            if row is not None:
+                row.extended_card = out.card
+                await session.commit()
+        return out
+
+    async def extended_card_for_url(
+        self, url: str, card_path: str | None = None
+    ) -> ExtendedCardOut:
+        """Fetch the card at ``url`` and then its extended card, without registering.
+
+        Raises:
+            CardFetchError: if the public card cannot be loaded.
+            AgentCallError: as for ``get_extended_card``.
+        """
+        result = await fetch_card(url, self._sink, card_path=card_path)
+        return await self._extended(result.card_json, default_interface_url(result.card), None)
+
+    async def _extended(
+        self, card_json: dict[str, Any], interface_url: str | None, agent_id: str | None
+    ) -> ExtendedCardOut:
+        card = card_from_json(card_json)
         if not card.capabilities.extended_agent_card:
             raise AgentCallError(
                 {
@@ -292,18 +317,13 @@ class AgentService:
                 }
             )
         try:
-            iface = select_interface(card, agent.selected_interface_url)
+            iface = select_interface(card, interface_url)
             extended, exchange_ids = await fetch_extended_card(
                 card, iface, self._sink, agent_id=agent_id
             )
         except Exception as exc:
             raise AgentCallError(classify_error(exc)) from exc
         extended_json = to_json(extended)
-        async with self._db.sessions() as session:
-            row = await session.get(Agent, agent_id)
-            if row is not None:
-                row.extended_card = extended_json
-                await session.commit()
         return ExtendedCardOut(
-            card=extended_json, diff=card_diff(agent.card, extended_json), exchange_ids=exchange_ids
+            card=extended_json, diff=card_diff(card_json, extended_json), exchange_ids=exchange_ids
         )

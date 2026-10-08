@@ -11,6 +11,7 @@ from a2a_workbench.core.connection.cards import CardFetchError
 from a2a_workbench.core.connection.client import InterfaceNotFoundError
 from a2a_workbench.core.conversations.errors import classify_error
 from a2a_workbench.core.conversations.service import ConversationNotFoundError
+from a2a_workbench.core.errors import AgentCallError
 from a2a_workbench.core.registry.service import AgentExistsError, AgentNotFoundError
 
 _STATUS: dict[type[Exception], int] = {
@@ -49,6 +50,11 @@ def install_error_handlers(app: FastAPI) -> None:
         payload["message"] = str(exc)
         return error_response(422, payload)
 
+    async def agent_call_error(_: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, AgentCallError)
+        return error_response(422, exc.classified)
+
     app.add_exception_handler(CardFetchError, card_error)
+    app.add_exception_handler(AgentCallError, agent_call_error)
     for exc_type, status in _STATUS.items():
         app.add_exception_handler(exc_type, _handler(status))

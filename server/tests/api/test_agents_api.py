@@ -39,3 +39,17 @@ def test_patch_interface_refresh_and_delete(client, zoo):
     assert client.post(f"/api/agents/{agent['id']}/refresh").status_code == 200
     assert client.delete(f"/api/agents/{agent['id']}").status_code == 204
     assert client.get(f"/api/agents/{agent['id']}").status_code == 404
+
+
+def test_extended_card_endpoint(client, zoo):
+    agent = client.post("/api/agents", json={"url": zoo.base_url}).json()
+    r = client.post(f"/api/agents/{agent['id']}/extended-card")
+    assert r.status_code == 200
+    assert any(d["path"] == "skills[visa]" for d in r.json()["diff"])
+    assert client.get(f"/api/agents/{agent['id']}").json()["extended_card"]["name"] == "Zoo agent"
+
+
+def test_extended_card_not_declared_is_422(client, legacy_zoo):
+    agent = client.post("/api/agents", json={"url": legacy_zoo.base_url}).json()
+    r = client.post(f"/api/agents/{agent['id']}/extended-card")
+    assert r.status_code == 422 and r.json()["error"]["reason"] == "NOT_DECLARED"

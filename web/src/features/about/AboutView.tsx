@@ -1,5 +1,8 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { JsonView } from "../../components/JsonView";
+import { api } from "../../lib/api";
+import { CardDiff } from "./CardDiff";
 import { bindingLabel } from "../../lib/labels";
 import type { Agent } from "../../lib/types";
 
@@ -21,7 +24,14 @@ function list(values: unknown): string {
 /** Everything the agent card declares, in plain language, with the raw card on request. */
 export function AboutView({ agent, onTry }: { agent: Agent; onTry: (text: string) => void }) {
   const [raw, setRaw] = useState(false);
-  const card = agent.card;
+  const [view, setView] = useState<"public" | "extended" | "diff">("public");
+  const qc = useQueryClient();
+  const extended = useMutation({
+    mutationFn: () => api.extendedCard(agent.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["agent", agent.id] }),
+  });
+  const offersExtended = !!agent.card.capabilities?.extendedAgentCard;
+  const card = view === "extended" && agent.extended_card ? agent.extended_card : agent.card;
   const caps = card.capabilities ?? {};
   const extensions: { uri: string; description?: string; required?: boolean; params?: unknown }[] =
     caps.extensions ?? [];
@@ -41,6 +51,41 @@ export function AboutView({ agent, onTry }: { agent: Agent; onTry: (text: string
             </p>
           </div>
         </div>
+        {offersExtended && (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card-h">
+              Extended card <small>· extra details the agent shares after sign-in</small>
+              <div className="spacer" />
+              <div className="seg">
+                {(["public", "extended", "diff"] as const).map((v) => (
+                  <button
+                    key={v}
+                    className={view === v ? "on" : ""}
+                    disabled={v !== "public" && !agent.extended_card && !extended.data}
+                    onClick={() => setView(v)}
+                  >
+                    {v === "public" ? "Public" : v === "extended" ? "Extended" : "Differences"}
+                  </button>
+                ))}
+              </div>
+              <button className="btn" onClick={() => extended.mutate()} disabled={extended.isPending}>
+                {extended.isPending ? "Loading…" : agent.extended_card ? "Reload" : "Load extended card"}
+              </button>
+            </div>
+            <div className="card-b">
+              {extended.isError && <div className="err">{(extended.error as Error).message}</div>}
+              {view === "diff" && extended.data && <CardDiff diff={extended.data.diff} />}
+              {view === "diff" && !extended.data && agent.extended_card && (
+                <p className="no">Reload the extended card to compute the differences.</p>
+              )}
+              {view !== "diff" && (
+                <p className="no">
+                  Showing the {view === "extended" ? "extended" : "public"} card below.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
         {raw && (
           <div style={{ marginBottom: 14 }}>
             <JsonView value={card} />

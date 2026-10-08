@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 
 from a2a_workbench.api.deps import get_workbench
-from a2a_workbench.core.registry.service import AgentOut, CardPreview
+from a2a_workbench.core.registry.service import AgentOut, CardPreview, ExtendedCardOut
 from a2a_workbench.core.workbench import Workbench
 
 router = APIRouter(prefix="/api")
@@ -49,6 +49,11 @@ async def patch_agent(
 @router.post("/agents/{agent_id}/refresh")
 async def refresh_agent(agent_id: str, wb: Workbench = Depends(get_workbench)) -> AgentOut:
     return await wb.agents.refresh_card(agent_id)
+
+
+@router.post("/agents/{agent_id}/extended-card")
+async def extended_card(agent_id: str, wb: Workbench = Depends(get_workbench)) -> ExtendedCardOut:
+    return await wb.agents.get_extended_card(agent_id)
 
 
 @router.delete("/agents/{agent_id}", status_code=204)

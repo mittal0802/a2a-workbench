@@ -1,7 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AboutView } from "./AboutView";
+
+const render = (ui: ReactElement) =>
+  rtlRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
 
 const agent = {
   id: "1",
@@ -46,5 +51,18 @@ describe("AboutView", () => {
     render(<AboutView agent={agent as never} onTry={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: /view raw card/i }));
     expect(screen.getByText(/"defaultInputModes"/)).toBeInTheDocument();
+  });
+});
+
+describe("AboutView extended card", () => {
+  it("offers the extended card only when the agent declares one", async () => {
+    const withExtended = { ...agent, card: { ...agent.card, capabilities: { extendedAgentCard: true } } };
+    render(<AboutView agent={withExtended as never} onTry={() => {}} />);
+    expect(screen.getByRole("button", { name: /load extended card/i })).toBeInTheDocument();
+  });
+
+  it("hides the extended card section otherwise", () => {
+    render(<AboutView agent={agent as never} onTry={() => {}} />);
+    expect(screen.queryByRole("button", { name: /load extended card/i })).toBeNull();
   });
 });

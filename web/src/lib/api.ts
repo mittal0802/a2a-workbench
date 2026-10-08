@@ -1,5 +1,7 @@
+import type { DiffEntry } from "../features/about/CardDiff";
 import type {
   Agent,
+  AgentCardJson,
   CardPreview,
   Conversation,
   ExchangeRecord,
@@ -44,6 +46,10 @@ export const api = {
   patchAgent: (id: string, selected_interface_url: string) =>
     call<Agent>(`/api/agents/${id}`, { method: "PATCH", body: json({ selected_interface_url }) }),
   refreshAgent: (id: string) => call<Agent>(`/api/agents/${id}/refresh`, { method: "POST" }),
+  extendedCard: (id: string) =>
+    call<{ card: AgentCardJson; diff: DiffEntry[]; exchange_ids: string[] }>(`/api/agents/${id}/extended-card`, {
+      method: "POST",
+    }),
   listConversations: (agentId: string) => call<Conversation[]>(`/api/agents/${agentId}/conversations`),
   createConversation: (agent_id: string) =>
     call<Conversation>("/api/conversations", { method: "POST", body: json({ agent_id }) }),

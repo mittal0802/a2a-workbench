@@ -23,6 +23,7 @@ from a2a_workbench.core.conversations.parts import (
     FilePartInput,
     TextPartInput,
 )
+from a2a_workbench.core.errors import AgentCallError
 from a2a_workbench.core.registry.service import AgentExistsError, AgentNotFoundError, AgentOut
 from a2a_workbench.core.workbench import Workbench
 
@@ -141,21 +142,47 @@ def agents_remove(ref: Annotated[str, typer.Argument(help="Agent id, name or URL
     _run(go())
 
 
+def _print_extended(out: Any, as_json: bool) -> None:
+    if as_json:
+        print_json(out.model_dump(mode="json"))
+        return
+    if not out.diff:
+        typer.echo("The extended card is identical to the public card.")
+    for d in out.diff:
+        typer.echo(f"  {d['change']} {d['path']}")
+
+
 @app.command()
 def card(
     target: Annotated[str, typer.Argument(help="Agent URL, card URL or registered agent.")],
+    extended: Annotated[
+        bool, typer.Option("--extended", help="Fetch the extended card and show differences.")
+    ] = False,
     as_json: JsonFlag = False,
 ) -> None:
-    """Fetch an agent card and verify its signature."""
+    """Fetch an agent card and verify its signature (or fetch its extended card)."""
 
     async def go() -> None:
         async with Workbench.open(Settings()) as wb:
-            url, card_path = target, None
+            url, card_path, agent_id = target, None, None
             try:
                 agent = await wb.agents.resolve(target)
-                url, card_path = agent.base_url, agent.card_path
+                url, card_path, agent_id = agent.base_url, agent.card_path, agent.id
             except AgentNotFoundError:
                 pass
+            if extended:
+                try:
+                    out = (
+                        await wb.agents.get_extended_card(agent_id)
+                        if agent_id
+                        else await wb.agents.extended_card_for_url(url, card_path)
+                    )
+                except CardFetchError as exc:
+                    _card_failure(exc, as_json)
+                except AgentCallError as exc:
+                    _fail(exc.classified["category"], str(exc), as_json)
+                _print_extended(out, as_json)
+                return
             try:
                 preview = await wb.agents.preview(url, card_path)
             except CardFetchError as exc:

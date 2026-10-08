@@ -39,6 +39,7 @@ export type Agent = {
   base_url: string;
   card_path: string | null;
   card: AgentCardJson;
+  extended_card?: AgentCardJson | null;
   signature_status: SignatureStatus;
   signature_detail: string | null;
   selected_interface_url: string | null;

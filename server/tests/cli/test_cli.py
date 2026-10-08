@@ -136,3 +136,15 @@ def test_card_of_registered_agent_uses_its_card_path(custom_path_zoo):
     r = runner.invoke(app, ["card", "Zoo agent", "--json"])
     assert r.exit_code == 0, r.output
     assert json.loads(r.stdout)["card"]["name"] == "Zoo agent"
+
+
+def test_card_extended_json(zoo):
+    r = runner.invoke(app, ["card", zoo.base_url, "--extended", "--json"])
+    assert r.exit_code == 0, r.output
+    out = json.loads(r.stdout)
+    assert any(d["path"] == "skills[visa]" for d in out["diff"])
+
+
+def test_card_extended_human(zoo):
+    r = runner.invoke(app, ["card", zoo.base_url, "--extended"])
+    assert "added skills[visa]" in r.stdout
