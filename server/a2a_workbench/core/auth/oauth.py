@@ -95,10 +95,12 @@ async def _post_token(
             "invalid_response", f"HTTP {response.status_code} without JSON", response.status_code
         ) from exc
     if response.status_code >= 400 or "error" in body:
+        if "error" in body:
+            raise OAuthError(
+                str(body["error"]), str(body.get("error_description", "")), response.status_code
+            )
         raise OAuthError(
-            str(body.get("error", "http_error")),
-            str(body.get("error_description", "")),
-            response.status_code,
+            "non_standard_error", str(body.get("message") or body)[:500], response.status_code
         )
     if "access_token" not in body:
         raise OAuthError(

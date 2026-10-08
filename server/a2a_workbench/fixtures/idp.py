@@ -25,6 +25,14 @@ from starlette.routing import Route
 from a2a_workbench.fixtures.serve import ThreadServer
 
 IDP_CLIENT = {"id": "workbench-client", "secret": "workbench-secret"}
+ALL_GRANTS = [
+    "client_credentials",
+    "password",
+    "authorization_code",
+    "implicit",
+    "refresh_token",
+    "urn:ietf:params:oauth:grant-type:device_code",
+]
 IDP_USER = {"username": "zoo-user", "password": "zoo-user-pass"}
 KID = "idp-1"
 
@@ -32,9 +40,18 @@ KID = "idp-1"
 class MockIdp:
     """State of the mock provider: signing key, pending codes and device grants."""
 
-    def __init__(self, issuer: str, *, token_lifetime: int = 3600) -> None:
+    def __init__(
+        self,
+        issuer: str,
+        *,
+        token_lifetime: int = 3600,
+        grants: list[str] | None = None,
+        error_style: str = "oauth",
+    ) -> None:
         self.issuer = issuer
         self.token_lifetime = token_lifetime
+        self.grants = grants or ALL_GRANTS
+        self.error_style = error_style
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         jwk = json.loads(RSAAlgorithm.to_jwk(self.key.public_key()))
         jwk.update({"kid": KID, "alg": "RS256", "use": "sig"})
@@ -121,14 +138,7 @@ def build_idp_app(idp: MockIdp) -> Starlette:
                 "device_authorization_endpoint": f"{i}/device_authorization",
                 "jwks_uri": f"{i}/jwks",
                 "userinfo_endpoint": f"{i}/userinfo",
-                "grant_types_supported": [
-                    "client_credentials",
-                    "password",
-                    "authorization_code",
-                    "implicit",
-                    "refresh_token",
-                    "urn:ietf:params:oauth:grant-type:device_code",
-                ],
+                "grant_types_supported": idp.grants,
                 "response_types_supported": ["code", "token"],
                 "code_challenge_methods_supported": ["S256"],
                 "scopes_supported": ["openid", "a2a:invoke", "a2a:extended-card", "booking.write"],
@@ -221,6 +231,17 @@ def build_idp_app(idp: MockIdp) -> Starlette:
     async def token(request: Request) -> Response:
         form = {k: str(v) for k, v in (await request.form()).items()}
         grant = form.get("grant_type")
+        if grant not in idp.grants:
+            if idp.error_style == "custom":
+                allowed = ", ".join(idp.grants)
+                return JSONResponse(
+                    {
+                        "type": "ValidationError",
+                        "message": f'"grant_type" must be one of [{allowed}].',
+                    },
+                    status_code=400,
+                )
+            return _error("unsupported_grant_type")
         client = _client_auth(request, form)
         if grant == "authorization_code":
             entry = idp.codes.pop(form.get("code", ""), None)
@@ -298,9 +319,21 @@ def build_idp_app(idp: MockIdp) -> Starlette:
 class IdpServer(ThreadServer):
     """Serves a ``MockIdp`` on a free port; ``.idp`` holds its state."""
 
-    def __init__(self, *, token_lifetime: int = 3600, port: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        token_lifetime: int = 3600,
+        port: int | None = None,
+        grants: list[str] | None = None,
+        error_style: str = "oauth",
+    ) -> None:
         from a2a_workbench.fixtures.runner import free_port
 
         port = port or free_port()
-        self.idp = MockIdp(f"http://127.0.0.1:{port}", token_lifetime=token_lifetime)
+        self.idp = MockIdp(
+            f"http://127.0.0.1:{port}",
+            token_lifetime=token_lifetime,
+            grants=grants,
+            error_style=error_style,
+        )
         super().__init__(build_idp_app(self.idp), port=port, ready_path="/jwks")

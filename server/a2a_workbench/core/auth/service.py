@@ -260,14 +260,17 @@ class AuthService:
             else:
                 raise CredentialError(f"{flow} needs a browser or device step")
         except oauth.OAuthError as exc:
-            raise AgentCallError(
-                {
-                    "category": "auth",
-                    "message": str(exc),
-                    "reason": exc.error,
-                    "http_status": exc.status,
-                }
-            ) from exc
+            classified: dict[str, Any] = {
+                "category": "auth",
+                "message": "The token endpoint refused the request: "
+                + (exc.description or exc.error),
+                "reason": exc.error,
+                "http_status": exc.status,
+            }
+            hint = await self._diagnose(card, scheme_name, flow)
+            if hint:
+                classified["hint"] = hint
+            raise AgentCallError(classified) from exc
         return await self.store_tokens(
             agent_id,
             scheme_name,
@@ -278,6 +281,34 @@ class AuthService:
             client_secret=client_secret,
             auth_method=auth_method,
         )
+
+    async def _diagnose(self, card: AgentCard, scheme_name: str, flow: str) -> str | None:
+        """Compare the card's flow with the provider's RFC 8414 / OpenID metadata."""
+        from a2a_workbench.core.auth import oauth
+
+        scheme = card.security_schemes[scheme_name]
+        kind = scheme.WhichOneof("scheme")
+        url = None
+        if kind == "oauth2_security_scheme":
+            url = scheme.oauth2_security_scheme.oauth2_metadata_url or None
+        elif kind == "open_id_connect_security_scheme":
+            url = scheme.open_id_connect_security_scheme.open_id_connect_url
+        if not url:
+            return None
+        try:
+            meta = await oauth.discover(url, self._sink)
+        except oauth.OAuthError:
+            return None
+        grant = {"device_code": "urn:ietf:params:oauth:grant-type:device_code"}.get(flow, flow)
+        supported = meta.get("grant_types_supported")
+        notes = []
+        if isinstance(supported, list) and grant not in supported:
+            notes.append(
+                f"The provider's metadata ({url}) does not list {flow} in grant_types_supported "
+                f"({', '.join(map(str, supported))}), so the {flow} flow declared in the agent "
+                "card cannot work. The agent card and its identity provider disagree."
+            )
+        return " ".join(notes) or None
 
     async def store_tokens(
         self,

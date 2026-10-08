@@ -107,3 +107,25 @@ async def test_each_flow_is_its_own_scheme_with_scopes(wb, oauth_zoo):
     }
     assert all("a2a:invoke" in s.scopes for s in overview.schemes)
     assert sorted(overview.requirements) == sorted([[n] for n in flows])
+
+
+async def test_failed_sign_in_explains_unsupported_grant_from_metadata(wb):
+    with (
+        IdpServer(grants=["authorization_code", "refresh_token"], error_style="custom") as idp,
+        ZooServer(auth="oauth", idp=idp.idp, grpc=False) as zoo,
+    ):
+        agent = await wb.agents.add(zoo.base_url)
+        with pytest.raises(AgentCallError) as info:
+            await wb.auth.sign_in(
+                agent.id,
+                "oauth",
+                flow="client_credentials",
+                client_id=IDP_CLIENT["id"],
+                client_secret=IDP_CLIENT["secret"],
+                scopes=[],
+                card=_card(agent),
+            )
+    c = info.value.classified
+    assert c["category"] == "auth"
+    assert '"grant_type" must be one of' in c["message"]
+    assert "does not list client_credentials" in c["hint"]
