@@ -16,6 +16,7 @@ from a2a.types import (
     MutualTlsSecurityScheme,
     OAuth2SecurityScheme,
     OAuthFlows,
+    OpenIdConnectSecurityScheme,
     PasswordOAuthFlow,
     SecurityRequirement,
     SecurityScheme,
@@ -33,6 +34,7 @@ ZooAuth = Literal[
     "and",
     "mtls",
     "oauth",
+    "oidc",
 ]
 ZOO_SECRETS = {
     "api_key": "zoo-api-key-1234",
@@ -168,6 +170,19 @@ def security_for(
     """
     if mode == "none":
         return {}, []
+    if mode == "oidc":
+        if not issuer:
+            raise ValueError("oidc mode needs an identity provider")
+        scheme = SecurityScheme(
+            open_id_connect_security_scheme=OpenIdConnectSecurityScheme(
+                description="Sign in with the mock OpenID provider.",
+                open_id_connect_url=f"{issuer}/.well-known/openid-configuration",
+            )
+        )
+        requirement = SecurityRequirement(
+            schemes={"oidc": StringList(list=["openid", "a2a:invoke"])}
+        )
+        return {"oidc": scheme}, [requirement]
     if mode == "oauth":
         if not issuer:
             raise ValueError("oauth mode needs an identity provider")
@@ -218,7 +233,7 @@ class ZooAuthMiddleware:
 
     def __init__(self, app: ASGIApp, mode: str, idp: Any = None) -> None:
         self.app = app
-        self.check = oauth_check(idp) if mode == "oauth" else CHECKS.get(mode)
+        self.check = oauth_check(idp) if mode in ("oauth", "oidc") else CHECKS.get(mode)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
@@ -249,7 +264,7 @@ class ZooGrpcAuthInterceptor(grpc.aio.ServerInterceptor):
     """Rejects gRPC calls whose metadata lacks the mode's credentials."""
 
     def __init__(self, mode: str, idp: Any = None) -> None:
-        self.check = oauth_check(idp) if mode == "oauth" else CHECKS.get(mode)
+        self.check = oauth_check(idp) if mode in ("oauth", "oidc") else CHECKS.get(mode)
 
     async def intercept_service(
         self,

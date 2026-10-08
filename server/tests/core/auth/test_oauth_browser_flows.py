@@ -129,3 +129,27 @@ async def test_password_flow(wb, oauth_zoo):
         card=card_from_json(agent.card),
     )
     assert await _chat_ok(wb, agent)
+
+
+async def test_openid_connect_sign_in_uses_discovery(wb, idp):
+    async with ZooServer(auth="oidc", idp=idp.idp, grpc=False) as zoo:
+        agent = await wb.agents.add(zoo.base_url)
+        card = card_from_json(agent.card)
+        assert (
+            card.security_schemes["oidc"].WhichOneof("scheme") == "open_id_connect_security_scheme"
+        )
+        start = await wb.auth.start_browser_flow(
+            agent.id,
+            "oidc",
+            client_id=IDP_CLIENT["id"],
+            scopes=["openid", "a2a:invoke"],
+            redirect_uri=REDIRECT,
+            card=card,
+        )
+        assert start.authorize_url.startswith(f"{idp.base_url}/authorize?")
+        location = await asyncio.to_thread(_approve, start.authorize_url)
+        q = parse_qs(urlparse(location).query)
+        await wb.auth.finish_browser_flow(state=q["state"][0], code=q["code"][0])
+        stored = await wb.credentials.get(agent.id, "oidc")
+        assert stored["id_token"]
+        assert await _chat_ok(wb, agent)
