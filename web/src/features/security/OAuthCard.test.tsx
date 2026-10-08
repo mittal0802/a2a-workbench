@@ -83,3 +83,35 @@ describe("OAuthCard failures", () => {
     expect(screen.getByText(/does not list client_credentials/i)).toBeInTheDocument();
   });
 });
+
+describe("OAuthCard browser and device flows", () => {
+  const browserScheme = { ...scheme, name: "oauthCode", flows: ["authorization_code"], description: "" };
+
+  it("opens the provider's sign-in page and shows the redirect URI to register", async () => {
+    const start = vi.spyOn(api, "oauthStart").mockResolvedValue({ authorize_url: "http://idp/authorize?x=1", state: "s", redirect_uri: "http://127.0.0.1:8484/oauth/callback" });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    setup(browserScheme as never);
+    expect(screen.getByText(/oauth\/callback/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/client id/i), "web-app");
+    await userEvent.click(screen.getByRole("button", { name: /sign in with your browser/i }));
+    expect(start).toHaveBeenCalledWith("ag", "oauthCode", { client_id: "web-app", scopes: ["a2a:invoke"] });
+    expect(open).toHaveBeenCalledWith("http://idp/authorize?x=1", "a2aw-oauth", expect.any(String));
+  });
+
+  it("shows the device code and polls until signed in", async () => {
+    vi.spyOn(api, "oauthDevice").mockResolvedValue({ flow_id: "f1", user_code: "ABC-123", verification_uri: "http://idp/device", verification_uri_complete: null, interval: 0, expires_in: 600 });
+    const poll = vi.spyOn(api, "pollDevice").mockResolvedValueOnce({ status: "pending" }).mockResolvedValue({ status: "signed_in" });
+    setup({ ...scheme, name: "oauthDevice", flows: ["device_code"], description: "" } as never);
+    await userEvent.type(screen.getByLabelText(/client id/i), "tv");
+    await userEvent.click(screen.getByRole("button", { name: /get a sign-in code/i }));
+    expect(await screen.findByText("ABC-123")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /idp\/device/ })).toHaveAttribute("href", "http://idp/device");
+    await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(await screen.findByText(/signed in on the other device/i)).toBeInTheDocument();
+  });
+
+  it("marks deprecated flows", () => {
+    setup({ ...scheme, flows: ["password"], description: "" } as never);
+    expect(screen.getByText(/deprecated flow/i)).toBeInTheDocument();
+  });
+});

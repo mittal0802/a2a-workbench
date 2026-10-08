@@ -102,6 +102,17 @@ export const api = {
       method: "POST",
       body: json(body),
     }),
+  oauthStart: (agentId: string, scheme: string, body: { client_id: string; client_secret?: string; scopes: string[] }) =>
+    call<{ authorize_url: string; state: string; redirect_uri: string }>(
+      `/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/start`,
+      { method: "POST", body: json(body) },
+    ),
+  oauthDevice: (agentId: string, scheme: string, body: { client_id: string; client_secret?: string; scopes: string[] }) =>
+    call<{ flow_id: string; user_code: string; verification_uri: string; verification_uri_complete: string | null; interval: number; expires_in: number | null }>(
+      `/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/device`,
+      { method: "POST", body: json(body) },
+    ),
+  pollDevice: (flowId: string) => call<{ status: string }>(`/api/oauth/device/${flowId}`),
   deleteCredential: (agentId: string, scheme: string) =>
     call<void>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, { method: "DELETE" }),
   faultPresets: () => call<FaultProfile[]>("/api/fault-presets"),
