@@ -302,6 +302,11 @@ def fixtures(
     host: Annotated[str, typer.Option()] = "127.0.0.1",
     port: Annotated[int, typer.Option()] = 9999,
     unsigned: Annotated[bool, typer.Option("--unsigned", help="Serve an unsigned card.")] = False,
+    grpc_port: Annotated[
+        int | None, typer.Option(help="gRPC port (default: HTTP port + 1).")
+    ] = None,
+    no_grpc: Annotated[bool, typer.Option("--no-grpc", help="Do not serve gRPC.")] = False,
+    legacy: Annotated[bool, typer.Option("--legacy", help="Speak A2A 0.3 instead of 1.0.")] = False,
 ) -> None:
     """Run the zoo reference agent until interrupted."""
     import uvicorn
@@ -309,8 +314,15 @@ def fixtures(
     from a2a_workbench.fixtures.zoo import build_zoo_app
 
     base_url = f"http://{host}:{port}"
-    typer.echo(f"Zoo agent at {base_url}", err=True)
-    uvicorn.run(build_zoo_app(base_url, signed=not unsigned), host=host, port=port)
+    grpc = None if no_grpc else (grpc_port or port + 1)
+    typer.echo(
+        f"Zoo agent at {base_url}"
+        + (f" (gRPC on {host}:{grpc})" if grpc else "")
+        + (" speaking A2A 0.3" if legacy else ""),
+        err=True,
+    )
+    app_ = build_zoo_app(base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy)
+    uvicorn.run(app_, host=host, port=port)
 
 
 async def _agent_id(wb: Workbench, target: str, as_json: bool) -> str:
