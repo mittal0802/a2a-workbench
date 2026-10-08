@@ -71,6 +71,9 @@ export const api = {
       body: json({ parts, options }),
     }),
   cancel: (id: string) => call<{ accepted: boolean }>(`/api/conversations/${id}/cancel`, { method: "POST" }),
+  resubscribe: (id: string, force = false) =>
+    call<{ accepted: boolean }>(`/api/conversations/${id}/resubscribe`, { method: "POST", body: json({ force }) }),
+  checkStatus: (id: string) => call<{ accepted: boolean }>(`/api/conversations/${id}/check-status`, { method: "POST" }),
   uploadBlob: (file: File) => {
     const form = new FormData();
     form.append("file", file);

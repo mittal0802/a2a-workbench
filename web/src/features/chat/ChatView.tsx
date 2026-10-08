@@ -53,6 +53,8 @@ export function ChatView({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agent.id] }),
   });
   const stop = useMutation({ mutationFn: () => api.cancel(conversationId!) });
+  const resubscribe = useMutation({ mutationFn: () => api.resubscribe(conversationId!) });
+  const checkStatus = useMutation({ mutationFn: () => api.checkStatus(conversationId!) });
 
   return (
     <div className="chat">
@@ -81,7 +83,14 @@ export function ChatView({
             t.kind === "user" ? (
               <UserBubble key={`u${t.event.seq}`} turn={t} />
             ) : (
-              <AgentBubble key={`a${i}`} turn={t} agentName={agent.name} onInspect={onInspect} />
+              <AgentBubble
+                key={`a${i}`}
+                turn={t}
+                agentName={agent.name}
+                onInspect={onInspect}
+                onResubscribe={() => resubscribe.mutate()}
+                onCheckStatus={() => checkStatus.mutate()}
+              />
             ),
           )}
           {send.isError && <div className="err">Could not send: {(send.error as Error).message}</div>}

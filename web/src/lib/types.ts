@@ -78,7 +78,7 @@ export type ErrorData = {
 export type TimelineEvent = {
   conversation_id: string;
   seq: number;
-  kind: "user_message" | "message" | "task" | "status" | "artifact" | "error";
+  kind: "user_message" | "message" | "task" | "status" | "artifact" | "error" | "connection_lost" | "recovered";
   ts: string;
   task_id: string | null;
   context_id: string | null;
@@ -147,4 +147,17 @@ export type TaskFilter = {
   history_length?: number;
   page_size?: number;
   page_token?: string;
+};
+
+export type ConnectionLostData = ErrorData & { task_id: string; last_state: string };
+export type RecoveryData = {
+  method: "subscribe" | "get_task";
+  first_event: string | null;
+  snapshot_first: boolean;
+  state_before: string | null;
+  state_after: string | null;
+  missed_states: string[];
+  missed_artifacts: string[];
+  duplicate_events: number;
+  terminal: boolean;
 };

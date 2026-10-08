@@ -90,4 +90,18 @@ describe("buildTurns", () => {
     if (agent.kind !== "agent") throw new Error();
     expect(agent.statusMessage).toBeNull();
   });
+
+  it("records connection loss and recovery on the agent turn", () => {
+    const turns = buildTurns([
+      ev(1, "user_message", { message: { parts: [] } }, null),
+      ev(2, "status", { state: "working", status: {} }),
+      ev(3, "connection_lost", { category: "transport", message: "dropped", task_id: "t1", last_state: "working" }),
+      ev(4, "task", { state: "working", task: { id: "t1" } }),
+      ev(5, "recovered", { method: "subscribe", snapshot_first: true }),
+    ]);
+    const agent = turns[1];
+    if (agent.kind !== "agent") throw new Error();
+    expect(agent.lost?.last_state).toBe("working");
+    expect(agent.recovered?.snapshot_first).toBe(true);
+  });
 });

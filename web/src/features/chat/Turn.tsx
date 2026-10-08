@@ -6,6 +6,7 @@ import { ArtifactCard } from "./ArtifactCard";
 import { AskCard } from "./AskCard";
 import { EventLog } from "./EventLog";
 import { PartView } from "./PartView";
+import { ConnectionLostCard, RecoveredSummary } from "./RecoveryCard";
 import { TaskProgress } from "./TaskProgress";
 
 const ERROR_TITLE: Record<ErrorData["category"], string> = {
@@ -34,10 +35,14 @@ export function AgentBubble({
   turn,
   agentName,
   onInspect,
+  onResubscribe,
+  onCheckStatus,
 }: {
   turn: AgentTurn;
   agentName: string;
   onInspect?: (exchangeId: string) => void;
+  onResubscribe?: () => void;
+  onCheckStatus?: () => void;
 }) {
   const first = turn.events[0];
   const last = turn.events[turn.events.length - 1];
@@ -85,6 +90,10 @@ export function AgentBubble({
             </div>
           )
         )}
+        {turn.lost && !turn.recovered && (
+          <ConnectionLostCard data={turn.lost} onResubscribe={onResubscribe} onCheck={onCheckStatus} />
+        )}
+        {turn.recovered && <RecoveredSummary data={turn.recovered} />}
         {turn.error && (
           <div className="err" role="alert">
             <b>{ERROR_TITLE[turn.error.category]}</b>

@@ -1,4 +1,4 @@
-import type { A2AArtifact, A2AMessage, ErrorData, TimelineEvent } from "./types";
+import type { A2AArtifact, A2AMessage, ConnectionLostData, ErrorData, RecoveryData, TimelineEvent } from "./types";
 
 export type UserTurn = { kind: "user"; event: TimelineEvent };
 export type AgentTurn = {
@@ -12,6 +12,8 @@ export type AgentTurn = {
   statusMessage: A2AMessage | null;
   events: TimelineEvent[];
   error: ErrorData | null;
+  lost: ConnectionLostData | null;
+  recovered: RecoveryData | null;
 };
 export type Turn = UserTurn | AgentTurn;
 
@@ -26,6 +28,8 @@ const emptyAgent = (): AgentTurn => ({
   statusMessage: null,
   events: [],
   error: null,
+  lost: null,
+  recovered: null,
 });
 
 /** Group a conversation's events into alternating user and agent turns, ordered by seq. */
@@ -63,6 +67,11 @@ export function buildTurns(events: TimelineEvent[]): Turn[] {
     }
     if (e.kind === "message") agent.messages.push(e.data.message as A2AMessage);
     if (e.kind === "error") agent.error = e.data as ErrorData;
+    if (e.kind === "connection_lost") {
+      agent.lost = e.data as ConnectionLostData;
+      agent.recovered = null;
+    }
+    if (e.kind === "recovered") agent.recovered = e.data as RecoveryData;
   }
   return turns;
 }
