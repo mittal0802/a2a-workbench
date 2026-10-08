@@ -106,3 +106,24 @@ def test_send_unreachable_url_exit_code_3():
 
 def test_bad_metadata_json_is_usage_error(zoo):
     assert runner.invoke(app, ["send", zoo.base_url, "x", "--metadata", "{bad"]).exit_code == 2
+
+
+def test_human_output_shows_artifacts_without_last_chunk(zoo):
+    r = runner.invoke(app, ["send", zoo.base_url, "echo hello"])
+    assert "artifact echo: echo hello" in r.stdout
+
+
+def test_human_output_shows_artifacts_of_non_streaming_task(zoo):
+    r = runner.invoke(app, ["send", zoo.base_url, "data", "--no-stream"])
+    assert 'artifact data: {"ok": true, "items": [1, 2, 3]}' in r.stdout
+
+
+def test_human_output_prints_streamed_artifact_once(zoo):
+    r = runner.invoke(app, ["send", zoo.base_url, "stream"])
+    assert r.stdout.count("artifact streamed:") == 1
+    assert "Streaming in four pieces." in r.stdout
+
+
+def test_human_output_shows_status_message_of_task_snapshot(zoo):
+    r = runner.invoke(app, ["send", zoo.base_url, "fail", "--no-stream"])
+    assert "Something went wrong." in r.stdout

@@ -12,7 +12,7 @@ from typing import Annotated, Any, NoReturn
 
 import typer
 
-from a2a_workbench.cli.output import ExitCode, describe_event, exit_code_for, print_json
+from a2a_workbench.cli.output import ExitCode, HumanPrinter, exit_code_for, print_json
 from a2a_workbench.core.config import Settings
 from a2a_workbench.core.connection.cards import CardFetchError
 from a2a_workbench.core.conversations.errors import classify_error
@@ -248,13 +248,18 @@ def send(
             agent = await _resolve_or_register(wb, target, as_json)
             conv = await wb.conversations.create(agent.id, origin="cli")
             code = ExitCode.OK
+            printer = HumanPrinter()
             async for event in wb.conversations.send(conv.id, parts, options):
                 if as_json:
                     print_json(event.model_dump(mode="json"))
-                elif (line := describe_event(event)) is not None:
-                    typer.echo(line)
+                else:
+                    for line in printer.feed(event):
+                        typer.echo(line)
                 if event.kind == "error":
                     code = exit_code_for(event.data["category"])
+            if not as_json:
+                for line in printer.finish():
+                    typer.echo(line)
             return code
 
     code = _run(go())
