@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "../../lib/api";
-import { InspectDrawer, curlFor, friendlyOperation } from "./InspectDrawer";
+import { InspectDrawer, curlFor, exchangeExport, friendlyOperation } from "./InspectDrawer";
 
 const summary = {
   id: "e1", operation: "send_message", http_method: "POST", url: "http://z/a2a", started_at: "",
@@ -41,6 +41,43 @@ describe("InspectDrawer", () => {
     expect(cmd).toContain("curl -X POST 'http://z/a2a'");
     expect(cmd).toContain("-H 'authorization: ••••'");
     expect(cmd).toContain(`--data '{"method":"SendStreamingMessage"}'`);
+  });
+
+  it("exports an exchange with parsed bodies and stream events", () => {
+    const out = exchangeExport(record as never);
+    expect(out.request).toEqual({
+      method: "POST",
+      url: "http://z/a2a",
+      headers: record.request_headers,
+      body: { method: "SendStreamingMessage" },
+    });
+    expect(out.response.status).toBe(200);
+    expect(out.response.events).toEqual([{ t_ms: 5, data: { result: { task: { id: "t" } } } }]);
+    expect(out.response.body).toBeUndefined();
+    const plain = exchangeExport({ ...record, frames: [], response_body: "not json" } as never);
+    expect(plain.response.body).toBe("not json");
+    expect(plain.response.events).toBeUndefined();
+  });
+
+  it("copies one exchange and exports the whole conversation", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "listExchanges").mockResolvedValue([summary]);
+    vi.spyOn(api, "getExchange").mockResolvedValue(record);
+    const saved: Blob[] = [];
+    URL.createObjectURL = vi.fn((b: Blob) => {
+      saved.push(b);
+      return "blob:x";
+    }) as never;
+    URL.revokeObjectURL = vi.fn();
+    renderDrawer("e1");
+    await user.click(await screen.findByRole("button", { name: "Copy exchange" }));
+    expect(JSON.parse(await navigator.clipboard.readText()).request.body).toEqual({ method: "SendStreamingMessage" });
+    await user.click(screen.getByRole("button", { name: "Export all" }));
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    const doc = JSON.parse(await saved[0].text());
+    expect(doc.conversation_id).toBe("c");
+    expect(doc.exchanges).toHaveLength(1);
+    expect(doc.exchanges[0].operation).toBe("send_message");
   });
 
   it("shows request, SSE frames and headers of the selected exchange", async () => {
