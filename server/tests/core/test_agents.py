@@ -9,7 +9,7 @@ async def test_add_list_get_resolve_remove(wb, zoo):
     agent = await wb.agents.add(zoo.base_url)
     assert agent.name == "Zoo agent" and agent.signature_status == "verified"
     assert agent.selected_interface_url == f"{zoo.base_url}/a2a"
-    assert {i.binding for i in agent.interfaces} == {"JSONRPC", "HTTP+JSON"}
+    assert {i.binding for i in agent.interfaces} == {"JSONRPC", "HTTP+JSON", "GRPC"}
     assert all(i.supported for i in agent.interfaces)
     assert [a.id for a in await wb.agents.list()] == [agent.id]
     assert (await wb.agents.resolve("Zoo agent")).id == agent.id

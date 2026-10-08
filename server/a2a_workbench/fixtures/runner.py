@@ -29,14 +29,18 @@ class ZooServer:
         host: str = "127.0.0.1",
         port: int | None = None,
         card_path: str = "/.well-known/agent-card.json",
+        grpc: bool = True,
     ) -> None:
         self.host = host
         self.port = port or free_port(host)
         self.base_url = f"http://{host}:{self.port}"
         self.card_path = card_path
-        app = build_zoo_app(self.base_url, signed=signed, card_path=card_path)
+        self.grpc_port = free_port(host) if grpc else None
+        app = build_zoo_app(
+            self.base_url, signed=signed, card_path=card_path, grpc_port=self.grpc_port
+        )
         self._server = uvicorn.Server(
-            uvicorn.Config(app, host=host, port=self.port, log_level="warning", lifespan="off")
+            uvicorn.Config(app, host=host, port=self.port, log_level="warning", lifespan="on")
         )
         self._thread = threading.Thread(target=self._server.run, daemon=True)
 

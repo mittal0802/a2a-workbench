@@ -56,3 +56,18 @@ def test_protocol_error_has_code_and_reason():
 
 def test_unknown_is_workbench():
     assert classify_error(RuntimeError("boom"))["category"] == "workbench"
+
+
+def test_grpc_codes():
+    import grpc
+
+    def err(code):
+        return grpc.aio.AioRpcError(code, grpc.aio.Metadata(), grpc.aio.Metadata(), "x")
+
+    assert classify_error(err(grpc.StatusCode.UNAVAILABLE))["category"] == "transport"
+    assert classify_error(err(grpc.StatusCode.DEADLINE_EXCEEDED))["category"] == "transport"
+    assert classify_error(err(grpc.StatusCode.UNAUTHENTICATED))["category"] == "auth"
+    assert (
+        classify_error(err(grpc.StatusCode.PERMISSION_DENIED))["grpc_status"] == "PERMISSION_DENIED"
+    )
+    assert classify_error(err(grpc.StatusCode.INTERNAL))["category"] == "protocol"

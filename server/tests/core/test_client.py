@@ -64,13 +64,13 @@ def test_card_for_interface_keeps_only_chosen():
     assert len(card.supported_interfaces) == 2
 
 
-async def test_grpc_not_supported_yet():
-    card = _card(("g", "GRPC", "1.0"))
+async def test_unknown_binding_is_unsupported():
+    card = _card(("x", "WEBSOCKET", "1.0"))
     with pytest.raises(UnsupportedBindingError):
         await open_client(card, card.supported_interfaces[0], _sink, streaming=True)
 
 
-@pytest.mark.parametrize("binding", ["JSONRPC", "HTTP+JSON"])
+@pytest.mark.parametrize("binding", ["JSONRPC", "HTTP+JSON", "GRPC"])
 @pytest.mark.parametrize("streaming", [True, False])
 async def test_send_over_each_binding(zoo, binding, streaming):
     result = await fetch_card(zoo.base_url, _sink)

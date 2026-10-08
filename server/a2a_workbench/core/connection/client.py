@@ -3,10 +3,12 @@
 from a2a.client import Client, ClientConfig, ClientFactory
 from a2a.types import AgentCard, AgentInterface
 
+from a2a_workbench.core.connection.grpc import build_grpc_channel_factory
 from a2a_workbench.core.connection.http import build_http_client
 from a2a_workbench.core.connection.recorder import ExchangeSink
+from a2a_workbench.core.faults.profile import FaultProfile
 
-SUPPORTED_BINDINGS = ("JSONRPC", "HTTP+JSON")
+SUPPORTED_BINDINGS = ("JSONRPC", "HTTP+JSON", "GRPC")
 _BINDING_PREFERENCE = ("JSONRPC", "HTTP+JSON", "GRPC")
 
 
@@ -57,12 +59,18 @@ def card_for_interface(card: AgentCard, iface: AgentInterface) -> AgentCard:
 
 
 async def open_client(
-    card: AgentCard, iface: AgentInterface, sink: ExchangeSink, *, streaming: bool
+    card: AgentCard,
+    iface: AgentInterface,
+    sink: ExchangeSink,
+    *,
+    streaming: bool,
+    faults: FaultProfile | None = None,
 ) -> Client:
     """Return an SDK client bound to ``iface``, recording all traffic to ``sink``.
 
     Streaming is used only when ``streaming`` is true and the card declares it.
-    Closing the client closes its HTTP connections.
+    ``faults`` injects that profile's failures beneath the SDK. Closing the
+    client closes its connections.
 
     Raises:
         UnsupportedBindingError: if ``iface`` uses a binding outside ``SUPPORTED_BINDINGS``.
@@ -71,7 +79,8 @@ async def open_client(
         raise UnsupportedBindingError(f"{iface.protocol_binding} is not supported yet")
     config = ClientConfig(
         streaming=streaming,
-        httpx_client=build_http_client(sink),
+        httpx_client=build_http_client(sink, faults=faults, binding=iface.protocol_binding),
+        grpc_channel_factory=build_grpc_channel_factory(sink, faults=faults),
         supported_protocol_bindings=[iface.protocol_binding],
     )
     return ClientFactory(config).create(card_for_interface(card, iface))

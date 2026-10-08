@@ -9,7 +9,7 @@ def test_zoo_serves_signed_card_and_jwks():
         jwks = httpx.get(f"{zoo.base_url}/.well-known/jwks.json").json()
     assert card["name"] == "Zoo agent"
     bindings = {i["protocolBinding"] for i in card["supportedInterfaces"]}
-    assert bindings == {"JSONRPC", "HTTP+JSON"}
+    assert bindings == {"JSONRPC", "HTTP+JSON", "GRPC"}
     assert card["capabilities"]["streaming"] is True
     assert card["signatures"]
     assert jwks["keys"][0]["kid"] == "zoo-1"
