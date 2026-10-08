@@ -25,6 +25,7 @@ class SendOptions(BaseModel):
     context_id: str | None = None
     interface_url: str | None = None
     faults: FaultProfile | None = None
+    skill_id: str | None = None
 
 
 def build_request(message: Message, options: SendOptions) -> SendMessageRequest:
@@ -51,9 +52,17 @@ def build_request(message: Message, options: SendOptions) -> SendMessageRequest:
     return request
 
 
-def build_call_context(options: SendOptions) -> ClientCallContext | None:
-    """Return a call context that activates ``options.extensions``, or None."""
-    if not options.extensions:
+def build_call_context(
+    options: SendOptions | None = None, headers: dict[str, str] | None = None
+) -> ClientCallContext | None:
+    """Return a call context carrying ``headers`` and activating the options' extensions.
+
+    Returns None when there is nothing to send.
+    """
+    extensions = options.extensions if options else []
+    if not extensions and not headers:
         return None
-    params = ServiceParametersFactory.create([with_a2a_extensions(options.extensions)])
+    params = dict(headers or {})
+    if extensions:
+        params = ServiceParametersFactory.create_from(params, [with_a2a_extensions(extensions)])
     return ClientCallContext(service_parameters=params)

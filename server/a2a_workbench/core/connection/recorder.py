@@ -108,8 +108,11 @@ SENSITIVE_QUERY_KEYS = frozenset(
 )
 
 
-def redact_url(url: str) -> str:
-    """Return ``url`` with user info and credential-like query values masked."""
+def redact_url(url: str, extra_keys: frozenset[str] = frozenset()) -> str:
+    """Return ``url`` with user info and credential-like query values masked.
+
+    ``extra_keys`` names further query parameters to mask.
+    """
     parts = urlsplit(url)
     netloc = parts.netloc
     if "@" in netloc:
@@ -118,7 +121,10 @@ def redact_url(url: str) -> str:
     if query:
         pairs = parse_qsl(query, keep_blank_values=True)
         query = urlencode(
-            [(k, REDACTED if k.lower() in SENSITIVE_QUERY_KEYS else v) for k, v in pairs],
+            [
+                (k, REDACTED if k.lower() in SENSITIVE_QUERY_KEYS or k in extra_keys else v)
+                for k, v in pairs
+            ],
             safe=REDACTED,
         )
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
@@ -254,10 +260,12 @@ class RecordingTransport(httpx.AsyncBaseTransport):
         inner: httpx.AsyncBaseTransport | None = None,
         *,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+        sensitive_query: frozenset[str] = frozenset(),
     ) -> None:
         self._sink = sink
         self._inner = inner or httpx.AsyncHTTPTransport()
         self._max = max_body_bytes
+        self._sensitive_query = sensitive_query
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         """Forward ``request`` to the inner transport and record the exchange."""
@@ -266,7 +274,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             id=uuid.uuid4().hex,
             operation=scope.operation if scope else "http",
             http_method=request.method,
-            url=redact_url(str(request.url)),
+            url=redact_url(str(request.url), self._sensitive_query),
             started_at=datetime.now(UTC),
             request_headers=redact_headers(request.headers),
             request_body=self._request_body(request),

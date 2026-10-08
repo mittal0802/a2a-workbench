@@ -3,6 +3,7 @@
 from a2a.client import Client, ClientConfig, ClientFactory
 from a2a.types import AgentCard, AgentInterface
 
+from a2a_workbench.core.auth.apply import AuthPlan
 from a2a_workbench.core.connection.grpc import build_grpc_channel_factory
 from a2a_workbench.core.connection.http import build_http_client
 from a2a_workbench.core.connection.recorder import ExchangeSink
@@ -66,12 +67,15 @@ async def open_client(
     *,
     streaming: bool,
     faults: FaultProfile | FaultInjector | None = None,
+    auth: AuthPlan | None = None,
 ) -> Client:
     """Return an SDK client bound to ``iface``, recording all traffic to ``sink``.
 
     Streaming is used only when ``streaming`` is true and the card declares it.
     ``faults`` injects failures beneath the SDK; pass the same injector to
-    several clients to share its rule state. Closing the
+    several clients to share its rule state. ``auth`` adds the plan's query
+    parameters and TLS client certificate to the transports; its headers are
+    sent per call through ``ClientCallContext.service_parameters``. Closing the
     client closes its connections.
 
     Raises:
@@ -82,8 +86,16 @@ async def open_client(
     injector = as_injector(faults)
     config = ClientConfig(
         streaming=streaming,
-        httpx_client=build_http_client(sink, faults=injector, binding=iface.protocol_binding),
-        grpc_channel_factory=build_grpc_channel_factory(sink, faults=injector),
+        httpx_client=build_http_client(
+            sink,
+            faults=injector,
+            binding=iface.protocol_binding,
+            query=auth.query if auth else None,
+            tls=auth.tls if auth else None,
+        ),
+        grpc_channel_factory=build_grpc_channel_factory(
+            sink, faults=injector, tls=auth.tls if auth else None
+        ),
         supported_protocol_bindings=[iface.protocol_binding],
     )
     return ClientFactory(config).create(card_for_interface(card, iface))

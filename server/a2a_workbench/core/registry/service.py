@@ -126,9 +126,10 @@ def _out(agent: Agent) -> AgentOut:
 class AgentService:
     """Registers agents by URL and keeps their cards."""
 
-    def __init__(self, db: Database, sink: ExchangeSink) -> None:
+    def __init__(self, db: Database, sink: ExchangeSink, auth: Any = None) -> None:
         self._db = db
         self._sink = sink
+        self._auth = auth
 
     async def preview(self, url: str, card_path: str | None = None) -> CardPreview:
         """Fetch and verify the card at ``url`` (or ``url`` + ``card_path``) without
@@ -320,8 +321,9 @@ class AgentService:
             )
         try:
             iface = select_interface(card, interface_url)
+            plan = await self._auth.plan(agent_id, card) if self._auth and agent_id else None
             extended, exchange_ids = await fetch_extended_card(
-                card, iface, self._sink, agent_id=agent_id
+                card, iface, self._sink, agent_id=agent_id, auth=plan
             )
         except Exception as exc:
             raise AgentCallError(classify_error(exc)) from exc

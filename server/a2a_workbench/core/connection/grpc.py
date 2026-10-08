@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 import grpc
 from google.protobuf.json_format import MessageToJson
 
+from a2a_workbench.core.auth.apply import TlsMaterial
+from a2a_workbench.core.auth.tls import grpc_credentials
 from a2a_workbench.core.connection.grpc_call import UnaryStreamCallProxy, as_channel_interceptors
 from a2a_workbench.core.connection.recorder import (
     REDACTED,
@@ -150,9 +152,15 @@ class RecordingGrpcInterceptor:
 
 
 def build_grpc_channel_factory(
-    sink: ExchangeSink, *, faults: FaultProfile | FaultInjector | None = None
+    sink: ExchangeSink,
+    *,
+    faults: FaultProfile | FaultInjector | None = None,
+    tls: TlsMaterial | None = None,
 ) -> Callable[[str], grpc.aio.Channel]:
-    """Return a factory creating recorded (and optionally fault-injected) channels."""
+    """Return a factory creating recorded (and optionally fault-injected) channels.
+
+    ``tls`` makes every channel TLS with that client certificate.
+    """
     injector = as_injector(faults)
 
     def factory(url: str) -> grpc.aio.Channel:
@@ -160,6 +168,8 @@ def build_grpc_channel_factory(
         interceptors = as_channel_interceptors(RecordingGrpcInterceptor(sink, target))
         if injector is not None:
             interceptors += as_channel_interceptors(FaultGrpcInterceptor(injector))
+        if tls is not None:
+            return grpc.aio.secure_channel(target, grpc_credentials(tls), interceptors=interceptors)
         if secure:
             return grpc.aio.secure_channel(
                 target, grpc.ssl_channel_credentials(), interceptors=interceptors

@@ -164,12 +164,18 @@ async def fetch_extended_card(
     sink: ExchangeSink,
     *,
     agent_id: str | None = None,
+    auth: Any = None,
 ) -> tuple[AgentCard, list[str]]:
-    """Call GetExtendedAgentCard over ``iface``; return the card and the exchange ids."""
+    """Call GetExtendedAgentCard over ``iface`` (authenticated with ``auth``, an
+    ``AuthPlan``); return the card and the exchange ids."""
     from a2a_workbench.core.connection.client import open_client
+    from a2a_workbench.core.conversations.options import build_call_context
 
     with recording_scope("get_extended_agent_card", agent_id=agent_id) as scope:
-        client = await open_client(card, iface, sink, streaming=False)
+        client = await open_client(card, iface, sink, streaming=False, auth=auth)
         async with client:
-            extended = await client.get_extended_agent_card(GetExtendedAgentCardRequest())
+            extended = await client.get_extended_agent_card(
+                GetExtendedAgentCardRequest(),
+                context=build_call_context(None, auth.headers if auth else None),
+            )
     return extended, list(scope.exchange_ids)

@@ -72,10 +72,10 @@ def build_auth_plan(
     plan = AuthPlan()
     if chosen is None:
         first = alternatives[0]
-        plan.missing = [n for n in first if n not in _usable(card, credentials)]
+        plan.missing = sorted(n for n in first if n not in _usable(card, credentials))
         return plan
     cookies: list[str] = []
-    for name in chosen:
+    for name in sorted(chosen):
         scheme = card.security_schemes[name]
         cred = credentials[name]
         kind = scheme.WhichOneof("scheme")

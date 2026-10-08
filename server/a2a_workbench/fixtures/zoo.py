@@ -43,6 +43,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from a2a_workbench.fixtures.auth import ZooAuthMiddleware, ZooGrpcAuthInterceptor, security_for
+
 KEY_ID = "zoo-1"
 ZOO_EXTENSION = "https://github.com/mittal0802/a2a-workbench/extensions/zoo-inspect/v1"
 PNG_1PX = base64.b64decode(
@@ -264,16 +266,23 @@ def build_zoo_app(
     card_path: str = "/.well-known/agent-card.json",
     grpc_port: int | None = None,
     legacy: bool = False,
+    auth: str = "none",
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
     With ``grpc_port``, the app's lifespan also serves the agent over gRPC on
     that port of the base URL's host. With ``legacy``, the card declares A2A
     0.3 and every binding is served through the SDK's v0.3 compatibility layer.
+    ``auth`` selects the security scheme the card declares and the A2A
+    endpoints enforce (the card and JWKS stay public).
     """
     host = base_url.split("://", 1)[1].split(":", 1)[0]
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
     card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
+    schemes, requirements = security_for(auth)
+    for name, scheme in schemes.items():
+        card.security_schemes[name].CopyFrom(scheme)
+    card.security_requirements.extend(requirements)
     private_key = ec.generate_private_key(ec.SECP256R1())
     jwk = json.loads(ECAlgorithm.to_jwk(private_key.public_key()))
     jwk.update({"kid": KEY_ID, "alg": "ES256", "use": "sig"})
@@ -322,7 +331,7 @@ def build_zoo_app(
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         server = None
         if grpc_target:
-            server = grpc.aio.server()
+            server = grpc.aio.server(interceptors=[ZooGrpcAuthInterceptor(auth)])
             if legacy:
                 a2a_v0_3_pb2_grpc.add_A2AServiceServicer_to_server(
                     CompatGrpcHandler(handler), server
@@ -337,4 +346,6 @@ def build_zoo_app(
             if server is not None:
                 await server.stop(grace=0)
 
-    return Starlette(routes=routes, lifespan=lifespan)
+    app = Starlette(routes=routes, lifespan=lifespan)
+    app.add_middleware(ZooAuthMiddleware, mode=auth)
+    return app

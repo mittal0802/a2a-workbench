@@ -31,6 +31,7 @@ class ZooServer:
         card_path: str = "/.well-known/agent-card.json",
         grpc: bool = True,
         legacy: bool = False,
+        auth: str = "none",
     ) -> None:
         self.host = host
         self.port = port or free_port(host)
@@ -43,6 +44,7 @@ class ZooServer:
             card_path=card_path,
             grpc_port=self.grpc_port,
             legacy=legacy,
+            auth=auth,
         )
         self._server = uvicorn.Server(
             uvicorn.Config(app, host=host, port=self.port, log_level="warning", lifespan="on")

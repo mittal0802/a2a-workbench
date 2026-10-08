@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from a2a_workbench.core.auth.service import AuthService
 from a2a_workbench.core.auth.store import CredentialStore
 from a2a_workbench.core.auth.vault import Vault, load_vault_key
 from a2a_workbench.core.blobs import BlobService
@@ -26,9 +27,12 @@ class Workbench:
         self.exchanges = ExchangeStore(self.db, self.bus)
         self.blobs = BlobService(self.db, settings.max_blob_bytes)
         self.credentials = CredentialStore(self.db, Vault(load_vault_key(settings)))
-        self.agents = AgentService(self.db, self.exchanges)
-        self.conversations = ConversationService(self.db, self.bus, self.exchanges, self.blobs)
-        self.tasks = TaskService(self.agents, self.exchanges)
+        self.auth = AuthService(self.credentials)
+        self.agents = AgentService(self.db, self.exchanges, self.auth)
+        self.conversations = ConversationService(
+            self.db, self.bus, self.exchanges, self.blobs, self.auth
+        )
+        self.tasks = TaskService(self.agents, self.exchanges, self.auth)
 
     async def start(self) -> None:
         """Create the state directory, the schema and the default workspace."""
