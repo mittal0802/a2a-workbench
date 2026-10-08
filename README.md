@@ -38,6 +38,8 @@ Exit codes: `0` ok, `1` checks failed, `2` usage error, `3` connection error, `4
 
 State lives in `~/.a2a-workbench/` (override with `A2AW_HOME`; database with `DATABASE_URL`).
 
+The server only answers to `localhost`, `127.0.0.1`, `::1` and its bind host, and rejects cross-site `Origin`s, so web pages you visit cannot reach it (DNS-rebinding protection). To open it under another name, set `A2AW_ALLOWED_HOSTS=workbench.lan,10.0.0.5`.
+
 ## Development
 
 ```bash

@@ -34,7 +34,7 @@ def test_spa_serves_index_assets_and_blocks_traversal(tmp_path):
     (static / "assets" / "a.js").write_text("console.log(1)")
     (static / "favicon.svg").write_text("<svg/>")
     (tmp_path / "secret.txt").write_text("secret")
-    with TestClient(create_app(static_dir=static)) as c:
+    with TestClient(create_app(static_dir=static), base_url="http://127.0.0.1:8484") as c:
         assert c.get("/agents/xyz/chat").text == "<html>app</html>"
         assert c.get("/assets/a.js").text == "console.log(1)"
         assert c.get("/favicon.svg").text == "<svg/>"

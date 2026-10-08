@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from a2a_workbench import __version__
 from a2a_workbench.api import routes_agents, routes_conversations, routes_misc, ws
 from a2a_workbench.api.errors import error_response, install_error_handlers
+from a2a_workbench.api.host_guard import HostGuardMiddleware, allowed_hosts
 from a2a_workbench.core.config import Settings
 from a2a_workbench.core.workbench import Workbench
 
@@ -23,7 +24,8 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
 
     Background sends are cancelled and awaited on shutdown.
     """
-    workbench = Workbench(settings or Settings())
+    settings = settings or Settings()
+    workbench = Workbench(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -39,6 +41,9 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
     app = FastAPI(title="A2A Workbench", version=__version__, lifespan=lifespan)
     app.state.workbench = workbench
     app.state.tasks = set()
+    app.add_middleware(
+        HostGuardMiddleware, hosts=allowed_hosts(settings.host, settings.extra_allowed_hosts)
+    )
     install_error_handlers(app)
     for module in (routes_misc, routes_agents, routes_conversations, ws):
         app.include_router(module.router)

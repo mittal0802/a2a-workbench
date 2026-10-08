@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     mode: Literal["local", "hosted"] = "local"
     max_blob_bytes: int = 20 * 1024 * 1024
     max_recorded_body_bytes: int = 1024 * 1024
+    allowed_hosts: str = ""
+
+    @property
+    def extra_allowed_hosts(self) -> list[str]:
+        """Hostnames from the comma-separated ``allowed_hosts`` setting."""
+        return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
     @property
     def resolved_database_url(self) -> str:
