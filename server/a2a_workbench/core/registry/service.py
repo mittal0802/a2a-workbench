@@ -24,6 +24,7 @@ from a2a_workbench.core.store.models import (
     DEFAULT_WORKSPACE_ID,
     Agent,
     Conversation,
+    Credential,
     ExchangeRow,
     TimelineEventRow,
 )
@@ -217,7 +218,7 @@ class AgentService:
         raise AgentNotFoundError(f"no agent matches {ref}")
 
     async def remove(self, agent_id: str) -> None:
-        """Delete an agent with its conversations, events and exchanges.
+        """Delete an agent with its conversations, events, exchanges and credentials.
 
         Raises:
             AgentNotFoundError: if it does not exist.
@@ -230,6 +231,7 @@ class AgentService:
             )
             await session.execute(delete(Conversation).where(Conversation.agent_id == agent_id))
             await session.execute(delete(ExchangeRow).where(ExchangeRow.agent_id == agent_id))
+            await session.execute(delete(Credential).where(Credential.agent_id == agent_id))
             await session.execute(delete(Agent).where(Agent.id == agent_id))
             await session.commit()
 

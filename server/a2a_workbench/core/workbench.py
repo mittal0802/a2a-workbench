@@ -3,6 +3,8 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from a2a_workbench.core.auth.store import CredentialStore
+from a2a_workbench.core.auth.vault import Vault, load_vault_key
 from a2a_workbench.core.blobs import BlobService
 from a2a_workbench.core.bus import EventBus
 from a2a_workbench.core.config import Settings
@@ -23,6 +25,7 @@ class Workbench:
         self.bus = EventBus()
         self.exchanges = ExchangeStore(self.db, self.bus)
         self.blobs = BlobService(self.db, settings.max_blob_bytes)
+        self.credentials = CredentialStore(self.db, Vault(load_vault_key(settings)))
         self.agents = AgentService(self.db, self.exchanges)
         self.conversations = ConversationService(self.db, self.bus, self.exchanges, self.blobs)
         self.tasks = TaskService(self.agents, self.exchanges)
