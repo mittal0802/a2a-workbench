@@ -49,6 +49,7 @@ class Exchange:
     agent_id: str | None = None
     conversation_id: str | None = None
     complete: bool = True
+    fault: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         """Return a JSON-serializable dict of every field."""
@@ -121,6 +122,12 @@ def redact_url(url: str) -> str:
             safe=REDACTED,
         )
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def current_operation() -> str | None:
+    """Return the operation label of the active recording scope, if any."""
+    scope = _current_scope.get()
+    return scope.operation if scope else None
 
 
 def redact_headers(headers: httpx.Headers) -> dict[str, str]:
@@ -273,9 +280,11 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             response = await self._inner.handle_async_request(request)
         except Exception as exc:
             exchange.error = f"{type(exc).__name__}: {exc}"
+            exchange.fault = request.extensions.get("a2aw_fault")
             exchange.duration_ms = round((time.perf_counter() - started) * 1000, 2)
             await self._sink(exchange)
             raise
+        exchange.fault = request.extensions.get("a2aw_fault")
         exchange.status = response.status_code
         exchange.response_headers = redact_headers(response.headers)
         exchange.complete = False
