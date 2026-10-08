@@ -51,7 +51,10 @@ def test_watch_task_resubscribes_in_a_conversation(client, zoo):
     conv = client.post("/api/conversations", json={"agent_id": agent["id"]}).json()
     client.post(
         f"/api/conversations/{conv['id']}/messages",
-        json={"parts": [{"kind": "text", "text": "long"}], "options": {"stream": False, "return_immediately": True}},
+        json={
+            "parts": [{"kind": "text", "text": "long"}],
+            "options": {"stream": False, "return_immediately": True},
+        },
     )
     for _ in range(100):
         task_id = client.get(f"/api/conversations/{conv['id']}").json()["conversation"]["task_id"]

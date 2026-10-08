@@ -19,7 +19,8 @@ class UnaryStreamCallProxy(grpc.aio.UnaryStreamCall):
     ``before_read`` may raise to fail the next read, ``read_timeout`` bounds
     how long one read may block (raising ``on_timeout()`` when exceeded),
     ``on_message`` sees (and returns) every message, and ``on_end`` runs once
-    with the terminating exception or ``None`` at end of stream. Both
+    with the terminating exception, ``None`` at end of stream, or
+    ``CancelledError`` when the call is cancelled before its end was read. Both
     ``read()`` and ``async for`` go through the hooks; every other method
     delegates to the wrapped call.
     """
@@ -41,6 +42,15 @@ class UnaryStreamCallProxy(grpc.aio.UnaryStreamCall):
         self._on_message = on_message
         self._on_end = on_end
         self._ended = False
+        self._finalizers: set[asyncio.Task[None]] = set()
+        call.add_done_callback(self._on_done)
+
+    def _on_done(self, call: Any) -> None:
+        if self._ended or not call.cancelled():
+            return
+        task = asyncio.get_running_loop().create_task(self._end(asyncio.CancelledError()))
+        self._finalizers.add(task)
+        task.add_done_callback(self._finalizers.discard)
 
     async def _end(self, error: BaseException | None) -> None:
         if self._ended:
@@ -93,7 +103,12 @@ class UnaryStreamCallProxy(grpc.aio.UnaryStreamCall):
         return self._call.time_remaining()  # type: ignore[no-any-return]
 
     def cancel(self) -> bool:
-        return bool(self._call.cancel())
+        cancelled = bool(self._call.cancel())
+        if not self._ended:
+            task = asyncio.get_running_loop().create_task(self._end(asyncio.CancelledError()))
+            self._finalizers.add(task)
+            task.add_done_callback(self._finalizers.discard)
+        return cancelled
 
     def add_done_callback(self, callback: Any) -> None:
         self._call.add_done_callback(callback)

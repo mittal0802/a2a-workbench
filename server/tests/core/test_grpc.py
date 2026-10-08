@@ -121,3 +121,30 @@ async def test_grpc_drop_after_ms_fires_while_the_stream_is_silent(zoo):
             [e async for e in client.send_message(_req("stall 4"))]
     assert time.monotonic() - start < 2
     assert classify_error(info.value)["category"] == "transport"
+
+
+async def test_abandoned_grpc_stream_completes_its_recording(zoo):
+    sink_all = []
+
+    async def sink(ex):
+        sink_all.append((ex.id, ex.complete))
+
+    card, iface = await _grpc(zoo, Sink())
+    async with await open_client(card, iface, sink, streaming=True) as client:
+        stream = client.send_message(_req("long"))
+        async for i, _ in _aenumerate(stream):
+            if i == 2:
+                break
+        await stream.aclose()
+    import asyncio
+
+    await asyncio.sleep(0.2)
+    grpc_ids = {i for i, _ in sink_all}
+    assert all(any(c for j, c in sink_all if j == i) for i in grpc_ids)
+
+
+async def _aenumerate(it):
+    i = 0
+    async for x in it:
+        yield i, x
+        i += 1
