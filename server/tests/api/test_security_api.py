@@ -65,3 +65,52 @@ def test_unknown_scheme_or_bad_credential_is_422(c, bearer_zoo):
         ).status_code
         == 422
     )
+
+
+@pytest.fixture(scope="module")
+def idp():
+    from a2a_workbench.fixtures.idp import IdpServer
+
+    with IdpServer() as server:
+        yield server
+
+
+@pytest.fixture(scope="module")
+def oauth_zoo(idp):
+    with ZooServer(auth="oauth", idp=idp.idp, grpc=False) as zoo:
+        yield zoo
+
+
+def test_oauth_client_credentials_sign_in_endpoint(c, oauth_zoo):
+    from a2a_workbench.fixtures.idp import IDP_CLIENT
+
+    agent = c.post("/api/agents", json={"url": oauth_zoo.base_url}).json()
+    r = c.post(
+        f"/api/agents/{agent['id']}/oauth/oauth/sign-in",
+        json={
+            "flow": "client_credentials",
+            "client_id": IDP_CLIENT["id"],
+            "client_secret": IDP_CLIENT["secret"],
+            "scopes": ["a2a:invoke"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert IDP_CLIENT["secret"] not in r.text
+    sec = c.get(f"/api/agents/{agent['id']}/security").json()
+    assert sec["status"] == "signed_in" and sec["active"] == ["oauth"]
+    oauth = next(s for s in sec["schemes"] if s["name"] == "oauth")
+    assert oauth["credential"]["preview"].startswith("signed in")
+    assert IDP_CLIENT["secret"] not in c.get(f"/api/agents/{agent['id']}/security").text
+
+
+def test_oauth_sign_in_with_wrong_secret_is_422_auth(c, oauth_zoo):
+    agent = c.post("/api/agents", json={"url": oauth_zoo.base_url}).json()
+    r = c.post(
+        f"/api/agents/{agent['id']}/oauth/oauth/sign-in",
+        json={
+            "flow": "client_credentials",
+            "client_id": "workbench-client",
+            "client_secret": "nope",
+        },
+    )
+    assert r.status_code == 422 and r.json()["error"]["reason"] == "invalid_client"
