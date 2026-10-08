@@ -11,6 +11,7 @@ from a2a_workbench.core.exchanges import ExchangeStore
 from a2a_workbench.core.registry.service import AgentService
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Workspace
+from a2a_workbench.core.tasks.service import TaskService
 
 
 class Workbench:
@@ -24,6 +25,7 @@ class Workbench:
         self.blobs = BlobService(self.db, settings.max_blob_bytes)
         self.agents = AgentService(self.db, self.exchanges)
         self.conversations = ConversationService(self.db, self.bus, self.exchanges, self.blobs)
+        self.tasks = TaskService(self.agents, self.exchanges)
 
     async def start(self) -> None:
         """Create the state directory, the schema and the default workspace."""

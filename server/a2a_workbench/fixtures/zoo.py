@@ -60,7 +60,9 @@ class ZooExecutor(AgentExecutor):
     sends a four-chunk artifact; ``ask`` enters ``input_required`` and completes
     on the reply; ``message`` answers with a direct Message; ``data`` and
     ``file`` return structured and file parts; ``fail`` and ``reject`` end in
-    those states; ``slow <seconds>`` works for that long; ``auth`` enters
+    those states; ``slow <seconds>`` works for that long; ``long`` streams ten
+    artifact chunks 150 ms apart; ``stall <seconds>`` goes silent after
+    starting work; ``auth`` enters
     ``auth_required``; ``inspect`` returns a data artifact describing the
     received message, configuration and requested extensions.
     """
@@ -111,6 +113,20 @@ class ZooExecutor(AgentExecutor):
                     append=i > 0,
                     last_chunk=i == len(chunks) - 1,
                 )
+            await updater.complete()
+        elif word == "long":
+            for i in range(10):
+                await asyncio.sleep(0.15)
+                await updater.add_artifact(
+                    [Part(text=f"part {i + 1} ")],
+                    artifact_id="long-1",
+                    name="long",
+                    append=i > 0,
+                    last_chunk=i == 9,
+                )
+            await updater.complete()
+        elif word == "stall":
+            await asyncio.sleep(float(rest or "30"))
             await updater.complete()
         elif word == "ask":
             await updater.requires_input(
