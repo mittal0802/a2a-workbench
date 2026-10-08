@@ -37,7 +37,8 @@ function plural(n: number, one: string, many: string): string {
 
 /** Plain-language result of a resubscribe or status check. */
 export function RecoveredSummary({ data }: { data: RecoveryData }) {
-  const good = (data.method === "get_task" || data.snapshot_first) && data.duplicate_events === 0;
+  const stillRunning = data.method === "get_task" && !data.terminal;
+  const good = !stillRunning && (data.method === "get_task" || data.snapshot_first) && data.duplicate_events === 0;
   const items: { ok: boolean; text: string }[] = [];
   if (data.method === "subscribe")
     items.push(
@@ -52,11 +53,12 @@ export function RecoveredSummary({ data }: { data: RecoveryData }) {
   );
   if (data.missed_states.length)
     items.push({ ok: true, text: `Caught up on: ${data.missed_states.map((s) => stateLabel(s).label).join(", ")}` });
+  if (stillRunning) items.push({ ok: true, text: "Resubscribe to receive the rest of its updates live" });
   if (data.missed_artifacts.length)
     items.push({ ok: true, text: plural(data.missed_artifacts.length, "result you missed", "results you missed") });
   return (
     <div className={`note ${good ? "ok" : "warn"}`} style={{ display: "block" }}>
-      <b>{good ? "Back in sync" : "Recovered, with issues"}</b>
+      <b>{stillRunning ? "Still working on the agent" : good ? "Back in sync" : "Recovered, with issues"}</b>
       <span className="no">
         {" "}
         · via {data.method === "subscribe" ? "resubscribe" : "status check"} ·{" "}

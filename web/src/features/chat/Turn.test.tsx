@@ -45,3 +45,25 @@ describe("AgentBubble", () => {
     expect(onInspect).toHaveBeenCalledWith("e1");
   });
 });
+
+describe("AgentBubble recovery", () => {
+  const lost = { category: "transport", message: "dropped", task_id: "t", last_state: "working" };
+  const rec = (over: Record<string, unknown>) => ({
+    method: "get_task", first_event: "task", snapshot_first: true, state_before: "working", state_after: "working",
+    missed_states: [], missed_artifacts: [], duplicate_events: 0, terminal: false, ...over,
+  });
+
+  it("keeps resubscribe available after a status check of a running task", () => {
+    const turn = agentTurn([ev(1, "connection_lost", lost), ev(2, "task", { state: "working", task: { id: "t" } }), ev(3, "recovered", rec({}))]);
+    render(<AgentBubble turn={turn} agentName="Zoo" onResubscribe={() => {}} />);
+    expect(screen.getByRole("button", { name: /resubscribe/i })).toBeInTheDocument();
+    expect(screen.getByText(/still working/i)).toBeInTheDocument();
+  });
+
+  it("hides the lost card once the task finished", () => {
+    const turn = agentTurn([ev(1, "connection_lost", lost), ev(2, "task", { state: "completed", task: { id: "t" } }), ev(3, "recovered", rec({ state_after: "completed", terminal: true }))]);
+    render(<AgentBubble turn={turn} agentName="Zoo" />);
+    expect(screen.queryByRole("button", { name: /resubscribe/i })).toBeNull();
+    expect(screen.getByText(/back in sync/i)).toBeInTheDocument();
+  });
+});

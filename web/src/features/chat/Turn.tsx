@@ -90,10 +90,10 @@ export function AgentBubble({
             </div>
           )
         )}
-        {turn.lost && !turn.recovered && (
+        {turn.recovered && <RecoveredSummary data={turn.recovered} />}
+        {turn.lost && !(turn.recovered && (turn.recovered.terminal || turn.recovered.method === "subscribe")) && (
           <ConnectionLostCard data={turn.lost} onResubscribe={onResubscribe} onCheck={onCheckStatus} />
         )}
-        {turn.recovered && <RecoveredSummary data={turn.recovered} />}
         {turn.error && (
           <div className="err" role="alert">
             <b>{ERROR_TITLE[turn.error.category]}</b>
