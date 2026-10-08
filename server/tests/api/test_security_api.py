@@ -186,3 +186,14 @@ def test_device_sign_in_endpoints(c, oauth_zoo):
     assert c.get(f"/api/oauth/device/{d['flow_id']}").json()["status"] == "pending"
     httpx.post(d["verification_uri"], data={"user_code": d["user_code"]})
     assert c.get(f"/api/oauth/device/{d['flow_id']}").json()["status"] == "signed_in"
+
+
+def test_probe_endpoint(c, bearer_zoo):
+    agent = c.post("/api/agents", json={"url": bearer_zoo.base_url}).json()
+    results = c.post(f"/api/agents/{agent['id']}/security/probe").json()
+    assert [r["check"] for r in results] == [
+        "rejects_anonymous",
+        "rejects_wrong_credentials",
+        "accepts_your_credentials",
+    ]
+    assert results[0]["outcome"] == "pass" and results[2]["outcome"] == "skipped"

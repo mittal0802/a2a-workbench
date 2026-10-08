@@ -572,6 +572,17 @@ class AuthService:
             )
         return " ".join(notes) or None
 
+    async def probe(
+        self, agent_id: str, card: AgentCard, interface_url: str | None = None
+    ) -> list[Any]:
+        """Check the agent rejects anonymous and wrong credentials and accepts ours."""
+        from a2a_workbench.core.auth.probe import probe_enforcement
+
+        await self.plan(agent_id, card)
+        return await probe_enforcement(
+            card, await self.credentials.all(agent_id), self._sink, interface_url=interface_url
+        )
+
     async def store_tokens(
         self,
         agent_id: str,

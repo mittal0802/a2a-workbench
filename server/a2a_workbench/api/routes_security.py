@@ -72,6 +72,17 @@ async def oauth_sign_in(
     )
 
 
+@router.post("/security/probe")
+async def security_probe(
+    agent_id: str, wb: Workbench = Depends(get_workbench)
+) -> list[dict[str, Any]]:
+    agent = await wb.agents.row(agent_id)
+    results = await wb.auth.probe(
+        agent_id, card_from_json(agent.card), interface_url=agent.selected_interface_url
+    )
+    return [r.model_dump() for r in results]
+
+
 @router.delete("/credentials/{scheme}", status_code=204)
 async def delete_credential(
     agent_id: str, scheme: str, wb: Workbench = Depends(get_workbench)
