@@ -102,3 +102,19 @@ async def test_stream_that_ends_early_is_connection_lost(wb, conv):
 async def test_non_streaming_return_immediately_is_not_connection_lost(wb, conv):
     events = await _send(wb, conv.id, "slow 2", stream=False, return_immediately=True)
     assert events[-1].kind == "task"
+
+
+async def test_resubscribe_refused_while_a_stream_is_open(wb, conv):
+    import asyncio
+
+    sending = asyncio.create_task(_send(wb, conv.id, "long"))
+    for _ in range(100):
+        if (await wb.conversations.get(conv.id)).task_state == "working":
+            break
+        await asyncio.sleep(0.02)
+    refused = [e async for e in wb.conversations.resubscribe(conv.id)]
+    assert refused[-1].kind == "error" and "already open" in refused[-1].data["message"]
+    events = await sending
+    assert sum(1 for e in events if e.kind == "artifact") == 10
+    stored = [e for e in await wb.conversations.events(conv.id) if e.kind == "artifact"]
+    assert len(stored) == 10

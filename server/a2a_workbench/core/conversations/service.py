@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 
@@ -120,6 +120,7 @@ class ConversationService:
         self._blobs = blobs
         self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._injectors = InjectorRegistry()
+        self._open_streams: Counter[str] = Counter()
 
     async def create(
         self, agent_id: str, *, title: str | None = None, origin: str = "chat"
@@ -282,11 +283,25 @@ class ConversationService:
     ) -> AsyncIterator[TimelineEvent]:
         """Resubscribe to the conversation's task (SubscribeToTask) and yield its events.
 
-        Ends with a ``recovered`` event holding the gap analysis. Tasks already
-        in a terminal state are refused locally unless ``force`` is set, in
-        which case the agent's own answer is reported.
+        Ends with a ``recovered`` event holding the gap analysis. Refused (as an
+        ``error`` event) while another stream of this conversation is open.
+        Tasks already in a terminal state are refused locally unless ``force``
+        is set, in which case the agent's own answer is reported.
         """
         conv, agent = await self._load(conversation_id)
+        if self._open_streams[conversation_id] > 0:
+            yield await self._emit(
+                TimelineEvent(
+                    conversation_id=conversation_id,
+                    kind="error",
+                    task_id=conv.task_id,
+                    data={
+                        "category": "workbench",
+                        "message": "A live stream is already open for this conversation.",
+                    },
+                )
+            )
+            return
         if not conv.task_id or (conv.task_state in TERMINAL_STATES and not force):
             reason = (
                 "There is no task to resubscribe to."
@@ -308,6 +323,7 @@ class ConversationService:
         assembler = ArtifactAssembler()
         after: list[TimelineEvent] = []
         state = conv.task_state
+        self._open_streams[conversation_id] += 1
         with recording_scope(
             "subscribe_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
@@ -338,6 +354,8 @@ class ConversationService:
                     conversation_id, exc, task_id, state, _last_exchange(scope)
                 )
                 return
+            finally:
+                self._open_streams[conversation_id] -= 1
         if state in OPEN_STATES:
             yield await self._stream_ended(conversation_id, task_id, state, _last_exchange(scope))
             return
@@ -461,6 +479,7 @@ class ConversationService:
             "send_message", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
             seen_task, seen_state, received = task_id, None, 0
+            self._open_streams[conversation_id] += 1
             try:
                 iface = select_interface(
                     card, options.interface_url or agent.selected_interface_url
@@ -494,6 +513,8 @@ class ConversationService:
                     conversation_id, exc, seen_task, seen_state, _last_exchange(scope)
                 )
                 return
+            finally:
+                self._open_streams[conversation_id] -= 1
             streamed = options.stream and card.capabilities.streaming
             if received == 0:
                 yield await self._emit(
