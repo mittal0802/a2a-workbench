@@ -7,9 +7,19 @@ import type {
   ExchangeRecord,
   ExchangeSummary,
   PartInput,
+  A2ATask,
   SendOptions,
+  TaskFilter,
+  TaskPage,
   TimelineEvent,
 } from "./types";
+
+function query(params: Record<string, unknown>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
 
 /** An API failure with the server's error category. */
 export class ApiError extends Error {
@@ -72,4 +82,9 @@ export const api = {
   listExchanges: (conversationId: string) =>
     call<ExchangeSummary[]>(`/api/exchanges?conversation_id=${encodeURIComponent(conversationId)}`),
   getExchange: (id: string) => call<ExchangeRecord>(`/api/exchanges/${id}`),
+  listTasks: (agentId: string, filter: TaskFilter) => call<TaskPage>(`/api/agents/${agentId}/tasks${query(filter)}`),
+  getTask: (agentId: string, taskId: string, history_length?: number) =>
+    call<A2ATask>(`/api/agents/${agentId}/tasks/${encodeURIComponent(taskId)}${query({ history_length })}`),
+  cancelTask: (agentId: string, taskId: string) =>
+    call<A2ATask>(`/api/agents/${agentId}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: "{}" }),
 };

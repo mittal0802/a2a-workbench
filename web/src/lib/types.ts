@@ -128,3 +128,23 @@ export const DEFAULT_OPTIONS: SendOptions = {
   message_metadata: null,
   reference_task_ids: [],
 };
+
+export type A2ATask = {
+  id: string;
+  contextId?: string;
+  state: string;
+  status?: { state?: string; timestamp?: string; message?: A2AMessage };
+  history?: A2AMessage[];
+  artifacts?: A2AArtifact[];
+  metadata?: Record<string, unknown>;
+};
+export type TaskPage = { tasks: A2ATask[]; next_page_token: string | null; page_size: number; total_size: number };
+export type TaskFilter = {
+  context_id?: string;
+  status?: string;
+  status_timestamp_after?: string;
+  include_artifacts?: boolean;
+  history_length?: number;
+  page_size?: number;
+  page_token?: string;
+};

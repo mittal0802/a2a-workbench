@@ -6,10 +6,12 @@ import { api } from "../../lib/api";
 import { AboutView } from "../about/AboutView";
 import { ChatView } from "../chat/ChatView";
 import { InspectDrawer } from "../inspect/InspectDrawer";
+import { TasksView } from "../tasks/TasksView";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
   { id: "chat", label: "Chat" },
+  { id: "tasks", label: "Tasks" },
   { id: "about", label: "About" },
 ] as const;
 
@@ -84,6 +86,11 @@ export function AgentPage() {
             focusExchangeId={focusExchange}
           />
         </section>
+        {tab === "tasks" && (
+          <section className="view on">
+            <TasksView agent={a} />
+          </section>
+        )}
         <section className={`view ${tab === "about" ? "on" : ""}`}>
           <AboutView
             agent={a}
