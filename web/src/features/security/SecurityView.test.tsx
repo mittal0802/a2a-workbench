@@ -69,3 +69,17 @@ describe("SecurityView", () => {
     expect(await screen.findByText(/doesn.t require sign-in/i)).toBeInTheDocument();
   });
 });
+
+describe("SecurityView enforcement checks", () => {
+  it("runs the checks and shows each result", async () => {
+    setup();
+    vi.spyOn(api, "probeSecurity").mockResolvedValue([
+      { check: "rejects_anonymous", title: "Blocks requests without sign-in", outcome: "fail", detail: "The agent accepted a call without credentials although its card requires authentication.", spec_ref: "A2A §4" },
+      { check: "accepts_your_credentials", title: "Accepts your sign-in", outcome: "pass", detail: "Your credentials were accepted.", spec_ref: "A2A §4" },
+    ] as never);
+    await userEvent.click(await screen.findByRole("button", { name: /check enforcement/i }));
+    expect(await screen.findByText("Blocks requests without sign-in")).toBeInTheDocument();
+    expect(screen.getByText(/accepted a call without credentials/)).toBeInTheDocument();
+    expect(screen.getByText("Accepts your sign-in").closest(".note")).toHaveClass("ok");
+  });
+});

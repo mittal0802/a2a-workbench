@@ -169,6 +169,45 @@ function requirementText(sec: SecurityOverview): string {
   return alts.length === 1 ? `This agent needs: ${alts[0]}.` : `This agent accepts any one of: ${alts.join(" · or · ")}.`;
 }
 
+const OUTCOME: Record<string, { cls: string; icon: string }> = {
+  pass: { cls: "ok", icon: "✓" },
+  fail: { cls: "bad", icon: "✕" },
+  warn: { cls: "warn", icon: "!" },
+  error: { cls: "bad", icon: "?" },
+  skipped: { cls: "warn", icon: "–" },
+  not_applicable: { cls: "ok", icon: "–" },
+};
+
+function Enforcement({ agentId }: { agentId: string }) {
+  const run = useMutation({ mutationFn: () => api.probeSecurity(agentId) });
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="card-h">
+        Is it enforced?
+        <small>· harmless GetTask calls without, with wrong, and with your credentials</small>
+        <span className="spacer" />
+        <button className="btn" onClick={() => run.mutate()} disabled={run.isPending}>
+          {run.isPending ? "Checking…" : "Check enforcement"}
+        </button>
+      </div>
+      <div className="card-b">
+        {run.isError && <div className="err">{(run.error as Error).message}</div>}
+        {run.data?.map((r) => (
+          <div key={r.check} className={`note ${OUTCOME[r.outcome]?.cls ?? "warn"}`}>
+            <span className="i">{OUTCOME[r.outcome]?.icon ?? "?"}</span>
+            <div>
+              {r.title}
+              <small>{r.detail}</small>
+            </div>
+            <a>{r.spec_ref}</a>
+          </div>
+        ))}
+        {!run.data && !run.isError && <p className="no">Run the checks to see whether the agent enforces its sign-in.</p>}
+      </div>
+    </div>
+  );
+}
+
 /** How the agent asks you to sign in, with a form for every scheme it declares. */
 export function SecurityView({ agentId }: { agentId: string }) {
   const sec = useQuery({ queryKey: ["security", agentId], queryFn: () => api.security(agentId) });
@@ -219,6 +258,7 @@ export function SecurityView({ agentId }: { agentId: string }) {
                 ),
               )}
             </div>
+            <Enforcement agentId={agentId} />
           </>
         )}
       </div>

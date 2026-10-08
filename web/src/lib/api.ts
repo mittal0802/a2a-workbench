@@ -112,6 +112,11 @@ export const api = {
       `/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/device`,
       { method: "POST", body: json(body) },
     ),
+  probeSecurity: (agentId: string) =>
+    call<{ check: string; title: string; outcome: string; detail: string; spec_ref: string }[]>(
+      `/api/agents/${agentId}/security/probe`,
+      { method: "POST" },
+    ),
   pollDevice: (flowId: string) => call<{ status: string }>(`/api/oauth/device/${flowId}`),
   deleteCredential: (agentId: string, scheme: string) =>
     call<void>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, { method: "DELETE" }),
