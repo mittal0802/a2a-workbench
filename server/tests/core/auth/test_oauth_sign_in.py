@@ -129,3 +129,41 @@ async def test_failed_sign_in_explains_unsupported_grant_from_metadata(wb):
     assert c["category"] == "auth"
     assert '"grant_type" must be one of' in c["message"]
     assert "does not list client_credentials" in c["hint"]
+
+
+async def test_skill_scope_enforced(wb, oauth_zoo):
+    agent = await wb.agents.add(oauth_zoo.base_url)
+    await wb.auth.sign_in(
+        agent.id,
+        "oauth",
+        flow="client_credentials",
+        client_id=IDP_CLIENT["id"],
+        client_secret=IDP_CLIENT["secret"],
+        scopes=["a2a:invoke"],
+        card=_card(agent),
+    )
+    conv = await wb.conversations.create(agent.id)
+    held = [
+        e
+        async for e in wb.conversations.send(
+            conv.id, [TextPartInput(text="hold AI175")], SendOptions(stream=False, skill_id="hold")
+        )
+    ]
+    assert held[-1].data["state"] == "auth_required"
+    await wb.auth.sign_in(
+        agent.id,
+        "oauth",
+        flow="client_credentials",
+        client_id=IDP_CLIENT["id"],
+        client_secret=IDP_CLIENT["secret"],
+        scopes=["a2a:invoke", "booking.write"],
+        card=_card(agent),
+    )
+    conv2 = await wb.conversations.create(agent.id)
+    ok = [
+        e
+        async for e in wb.conversations.send(
+            conv2.id, [TextPartInput(text="hold AI175")], SendOptions(stream=False, skill_id="hold")
+        )
+    ]
+    assert ok[-1].data["state"] == "completed"

@@ -28,6 +28,8 @@ from a2a.types import (
     AgentProvider,
     AgentSkill,
     Part,
+    SecurityRequirement,
+    StringList,
     Task,
     TaskState,
     TaskStatus,
@@ -54,6 +56,21 @@ PNG_1PX = base64.b64decode(
 
 def _data(obj: Any) -> Value:
     return ParseDict(obj, Value())
+
+
+def _token_scopes(context: RequestContext) -> list[str]:
+    """Return the scopes of the caller's bearer JWT (already verified by the middleware)."""
+    import jwt as pyjwt
+
+    headers = context.call_context.state.get("headers", {}) if context.call_context else {}
+    auth = headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return []
+    try:
+        claims = pyjwt.decode(auth[7:], options={"verify_signature": False})
+    except pyjwt.PyJWTError:
+        return []
+    return str(claims.get("scope", "")).split()
 
 
 class ZooExecutor(AgentExecutor):
@@ -130,6 +147,16 @@ class ZooExecutor(AgentExecutor):
             await updater.complete()
         elif word == "stall":
             await asyncio.sleep(float(rest or "30"))
+            await updater.complete()
+        elif word == "hold":
+            if "booking.write" not in _token_scopes(context):
+                await updater.requires_auth(
+                    updater.new_agent_message(
+                        [Part(text="Holding a booking needs the booking.write scope.")]
+                    )
+                )
+                return
+            await updater.add_artifact([Part(text=f"Held {rest or 'the booking'}.")], name="hold")
             await updater.complete()
         elif word == "ask":
             await updater.requires_input(
@@ -284,6 +311,25 @@ def build_zoo_app(
     for name, scheme in schemes.items():
         card.security_schemes[name].CopyFrom(scheme)
     card.security_requirements.extend(requirements)
+    if auth in ("oauth", "oidc"):
+        card.skills.append(
+            AgentSkill(
+                id="hold",
+                name="Hold a booking",
+                description="Holds a booking; needs the booking.write scope.",
+                tags=["auth"],
+                examples=["hold AI175"],
+                security_requirements=[
+                    SecurityRequirement(
+                        schemes={
+                            "oauth" if auth == "oauth" else "oidc": StringList(
+                                list=["booking.write"]
+                            )
+                        }
+                    )
+                ],
+            )
+        )
     private_key = ec.generate_private_key(ec.SECP256R1())
     jwk = json.loads(ECAlgorithm.to_jwk(private_key.public_key()))
     jwk.update({"kid": KEY_ID, "alg": "ES256", "use": "sig"})
