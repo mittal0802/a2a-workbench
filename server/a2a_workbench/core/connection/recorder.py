@@ -63,12 +63,17 @@ ExchangeSink = Callable[[Exchange], Awaitable[None]]
 
 @dataclass
 class RecordingScope:
-    """Labels attached to exchanges recorded while the scope is active."""
+    """Labels attached to exchanges recorded while the scope is active.
+
+    ``redact_fields`` names form or JSON body fields whose values are masked
+    in the recorded request and response bodies.
+    """
 
     operation: str
     agent_id: str | None = None
     conversation_id: str | None = None
     exchange_ids: list[str] = field(default_factory=list)
+    redact_fields: frozenset[str] = frozenset()
 
 
 _current_scope: ContextVar[RecordingScope | None] = ContextVar("a2aw_recording_scope", default=None)
@@ -76,10 +81,14 @@ _current_scope: ContextVar[RecordingScope | None] = ContextVar("a2aw_recording_s
 
 @contextmanager
 def recording_scope(
-    operation: str, *, agent_id: str | None = None, conversation_id: str | None = None
+    operation: str,
+    *,
+    agent_id: str | None = None,
+    conversation_id: str | None = None,
+    redact_fields: frozenset[str] = frozenset(),
 ) -> Iterator[RecordingScope]:
     """Label exchanges recorded in this context and collect their ids."""
-    scope = RecordingScope(operation, agent_id, conversation_id)
+    scope = RecordingScope(operation, agent_id, conversation_id, redact_fields=redact_fields)
     token = _current_scope.set(scope)
     try:
         yield scope
@@ -130,6 +139,24 @@ def redact_url(url: str, extra_keys: frozenset[str] = frozenset()) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
 
 
+def redact_body(body: str | None, fields: frozenset[str]) -> str | None:
+    """Return ``body`` with the values of ``fields`` masked in form-encoded or JSON content."""
+    if not body or not fields:
+        return body
+    import json
+
+    try:
+        value = json.loads(body)
+    except ValueError:
+        value = None
+    if isinstance(value, dict):
+        return json.dumps({k: (REDACTED if k in fields else v) for k, v in value.items()})
+    if "=" in body and "\n" not in body:
+        pairs = parse_qsl(body, keep_blank_values=True)
+        return urlencode([(k, REDACTED if k in fields else v) for k, v in pairs], safe=REDACTED)
+    return body
+
+
 def current_operation() -> str | None:
     """Return the operation label of the active recording scope, if any."""
     scope = _current_scope.get()
@@ -166,7 +193,9 @@ class _RecordingStream(httpx.AsyncByteStream):
         is_sse: bool,
         max_body_bytes: int,
         content_encoding: str,
+        redact: frozenset[str] = frozenset(),
     ) -> None:
+        self._redact = redact
         self._inner = inner
         self._ex = exchange
         self._started = started
@@ -240,6 +269,7 @@ class _RecordingStream(httpx.AsyncByteStream):
             self._ex.response_body = "(compressed body not decoded)"
         elif not self._is_sse:
             self._ex.response_body = self._body.decode("utf-8", errors="replace")
+        self._ex.response_body = redact_body(self._ex.response_body, self._redact)
         self._ex.duration_ms = self._elapsed()
         self._ex.complete = True
         await self._sink(self._ex)
@@ -277,7 +307,9 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             url=redact_url(str(request.url), self._sensitive_query),
             started_at=datetime.now(UTC),
             request_headers=redact_headers(request.headers),
-            request_body=self._request_body(request),
+            request_body=redact_body(
+                self._request_body(request), scope.redact_fields if scope else frozenset()
+            ),
             agent_id=scope.agent_id if scope else None,
             conversation_id=scope.conversation_id if scope else None,
         )
@@ -305,6 +337,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             is_sse=response.headers.get("content-type", "").startswith("text/event-stream"),
             max_body_bytes=self._max,
             content_encoding=response.headers.get("content-encoding", ""),
+            redact=scope.redact_fields if scope else frozenset(),
         )
         return httpx.Response(
             status_code=response.status_code,
