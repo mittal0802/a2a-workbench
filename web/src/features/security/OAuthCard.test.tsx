@@ -66,3 +66,20 @@ describe("OAuthCard", () => {
     expect(flowSummary("implicit")).toMatch(/deprecated/);
   });
 });
+
+describe("OAuthCard failures", () => {
+  it("shows why sign-in failed, including the card/provider mismatch", async () => {
+    const { ApiError } = await import("../../lib/api");
+    vi.spyOn(api, "oauthSignIn").mockRejectedValue(
+      new ApiError(422, "auth", "The token endpoint refused the request: grant_type must be one of …", {
+        hint: "The provider's metadata does not list client_credentials in grant_types_supported.",
+      }),
+    );
+    setup();
+    await userEvent.type(screen.getByLabelText(/client id/i), "bot-1");
+    await userEvent.type(screen.getByLabelText(/client secret/i), "s");
+    await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+    expect(await screen.findByText(/token endpoint refused/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not list client_credentials/i)).toBeInTheDocument();
+  });
+});

@@ -32,6 +32,7 @@ export class ApiError extends Error {
     public status: number,
     public category: string,
     message: string,
+    public detail: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -45,7 +46,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const err = body.error ?? { category: "workbench", message: body.detail ?? res.statusText };
     const message = typeof err.message === "string" ? err.message : JSON.stringify(body.detail ?? err);
-    throw new ApiError(res.status, err.category ?? "workbench", message);
+    throw new ApiError(res.status, err.category ?? "workbench", message, typeof err === "object" ? err : {});
   }
   return body as T;
 }

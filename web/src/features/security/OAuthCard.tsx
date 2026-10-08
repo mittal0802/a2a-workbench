@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "../../lib/api";
+import { ApiError, api } from "../../lib/api";
 import type { SchemeOverview } from "../../lib/types";
 
 const FLOW_TEXT: Record<string, string> = {
@@ -199,7 +199,15 @@ export function OAuthCard({
           </form>
         )}
         {(signIn.isError || paste.isError || signOut.isError) && (
-          <div className="err">{((signIn.error ?? paste.error ?? signOut.error) as Error).message}</div>
+          <div className="err" role="alert">
+            {((signIn.error ?? paste.error ?? signOut.error) as Error).message}
+            {signIn.error instanceof ApiError && typeof signIn.error.detail.hint === "string" && (
+              <div style={{ marginTop: 6, color: "var(--text)" }}>
+                <b>Why: </b>
+                {signIn.error.detail.hint}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
