@@ -42,3 +42,34 @@ class FaultInjector:
                 continue
             return rule
         return None
+
+
+def as_injector(faults: "FaultProfile | FaultInjector | None") -> "FaultInjector | None":
+    """Return ``faults`` as an injector: injectors pass through, profiles get a fresh one."""
+    if faults is None or isinstance(faults, FaultInjector):
+        return faults
+    return FaultInjector(faults)
+
+
+class InjectorRegistry:
+    """Keeps one injector per key while the key's profile stays the same.
+
+    A rule's ``once``, ``nth_call`` and seeded ``probability`` state therefore
+    spans every call made under the same key (e.g. a conversation); a changed
+    profile starts over.
+    """
+
+    def __init__(self) -> None:
+        self._injectors: dict[str, tuple[str, FaultInjector]] = {}
+
+    def get(self, key: str, profile: FaultProfile | None) -> FaultInjector | None:
+        """Return the injector for ``key`` and ``profile`` (None when there is no profile)."""
+        if profile is None:
+            self._injectors.pop(key, None)
+            return None
+        fingerprint = profile.model_dump_json()
+        current = self._injectors.get(key)
+        if current is None or current[0] != fingerprint:
+            current = (fingerprint, FaultInjector(profile))
+            self._injectors[key] = current
+        return current[1]

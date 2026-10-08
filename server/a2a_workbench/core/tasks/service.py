@@ -20,6 +20,7 @@ from a2a_workbench.core.connection.client import open_client, select_interface
 from a2a_workbench.core.connection.recorder import ExchangeSink, recording_scope
 from a2a_workbench.core.conversations.errors import classify_error
 from a2a_workbench.core.errors import AgentCallError
+from a2a_workbench.core.faults.injector import FaultInjector
 from a2a_workbench.core.faults.profile import FaultProfile
 from a2a_workbench.core.registry.service import AgentService
 
@@ -80,7 +81,8 @@ class TaskService:
 
     Every call is recorded under its operation label (``get_task``,
     ``list_tasks``, ``cancel_task``, ``subscribe_task``) and accepts an optional
-    fault profile. Failures raise ``AgentCallError``.
+    fault profile, or an injector shared across calls. Failures raise
+    ``AgentCallError``.
     """
 
     def __init__(self, agents: AgentService, sink: ExchangeSink) -> None:
@@ -89,7 +91,12 @@ class TaskService:
 
     @asynccontextmanager
     async def _client(
-        self, agent_id: str, operation: str, faults: FaultProfile | None, *, streaming: bool = False
+        self,
+        agent_id: str,
+        operation: str,
+        faults: FaultProfile | FaultInjector | None,
+        *,
+        streaming: bool = False,
     ) -> AsyncIterator[Client]:
         agent = await self._agents.row(agent_id)
         card = card_from_json(agent.card)
@@ -112,7 +119,7 @@ class TaskService:
         task_id: str,
         *,
         history_length: int | None = None,
-        faults: FaultProfile | None = None,
+        faults: FaultProfile | FaultInjector | None = None,
     ) -> dict[str, Any]:
         """Return the task's JSON plus its short ``state``."""
         req = GetTaskRequest(id=task_id)
@@ -122,7 +129,11 @@ class TaskService:
             return _task_json(await client.get_task(req))
 
     async def list(
-        self, agent_id: str, f: ListTasksFilter, *, faults: FaultProfile | None = None
+        self,
+        agent_id: str,
+        f: ListTasksFilter,
+        *,
+        faults: FaultProfile | FaultInjector | None = None,
     ) -> dict[str, Any]:
         """Return ``{"tasks", "next_page_token", "page_size", "total_size"}`` for ``f``."""
         async with self._client(agent_id, "list_tasks", faults) as client:
@@ -140,7 +151,7 @@ class TaskService:
         task_id: str,
         *,
         metadata: dict[str, Any] | None = None,
-        faults: FaultProfile | None = None,
+        faults: FaultProfile | FaultInjector | None = None,
     ) -> dict[str, Any]:
         """Request cancellation and return the resulting task."""
         req = CancelTaskRequest(id=task_id)
@@ -150,7 +161,7 @@ class TaskService:
             return _task_json(await client.cancel_task(req))
 
     async def subscribe(
-        self, agent_id: str, task_id: str, *, faults: FaultProfile | None = None
+        self, agent_id: str, task_id: str, *, faults: FaultProfile | FaultInjector | None = None
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield ``{"kind", "state", "event"}`` for each event of the resubscribed stream."""
         async with self._client(agent_id, "subscribe_task", faults, streaming=True) as client:

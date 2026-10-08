@@ -84,7 +84,7 @@ export function Composer({
           <span className="i">!</span>
           <div>
             Network conditions: {profileLabel(options.faults)}
-            <small>Failures are injected beneath the SDK on every message until you turn this off.</small>
+            <small>Injected beneath the SDK. “Once” rules fire once per conversation; switching profiles starts over.</small>
           </div>
           <button className="btn ghost" style={{ marginLeft: "auto" }} onClick={() => setOptions({ ...options, faults: null })}>
             Turn off

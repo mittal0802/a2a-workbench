@@ -20,7 +20,7 @@ from a2a_workbench.core.connection.recorder import (
     _current_scope,
 )
 from a2a_workbench.core.faults.grpc import FaultGrpcInterceptor, grpc_fault_label
-from a2a_workbench.core.faults.injector import FaultInjector
+from a2a_workbench.core.faults.injector import FaultInjector, as_injector
 from a2a_workbench.core.faults.profile import FaultProfile
 
 _DEFAULT_PORTS = {"https": 443, "grpcs": 443, "http": 80, "grpc": 80}
@@ -150,10 +150,10 @@ class RecordingGrpcInterceptor:
 
 
 def build_grpc_channel_factory(
-    sink: ExchangeSink, *, faults: FaultProfile | None = None
+    sink: ExchangeSink, *, faults: FaultProfile | FaultInjector | None = None
 ) -> Callable[[str], grpc.aio.Channel]:
     """Return a factory creating recorded (and optionally fault-injected) channels."""
-    injector = FaultInjector(faults) if faults else None
+    injector = as_injector(faults)
 
     def factory(url: str) -> grpc.aio.Channel:
         target, secure = parse_grpc_target(url)

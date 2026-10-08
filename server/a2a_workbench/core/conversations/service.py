@@ -37,6 +37,7 @@ from a2a_workbench.core.conversations.options import (
 )
 from a2a_workbench.core.conversations.parts import AnyPartInput, build_part
 from a2a_workbench.core.conversations.timeline import TimelineEvent, event_from_stream_response
+from a2a_workbench.core.faults.injector import InjectorRegistry
 from a2a_workbench.core.faults.profile import FaultProfile
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import (
@@ -117,6 +118,7 @@ class ConversationService:
         self._sink = sink
         self._blobs = blobs
         self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._injectors = InjectorRegistry()
 
     async def create(
         self, agent_id: str, *, title: str | None = None, origin: str = "chat"
@@ -292,7 +294,13 @@ class ConversationService:
         ) as scope:
             try:
                 iface = select_interface(card, agent.selected_interface_url)
-                client = await open_client(card, iface, self._sink, streaming=True, faults=faults)
+                client = await open_client(
+                    card,
+                    iface,
+                    self._sink,
+                    streaming=True,
+                    faults=self._injectors.get(conversation_id, faults),
+                )
                 async with client:
                     async for resp in client.subscribe(SubscribeToTaskRequest(id=task_id)):
                         event = await self._emit(
@@ -343,7 +351,13 @@ class ConversationService:
         ) as scope:
             try:
                 iface = select_interface(card, agent.selected_interface_url)
-                client = await open_client(card, iface, self._sink, streaming=False, faults=faults)
+                client = await open_client(
+                    card,
+                    iface,
+                    self._sink,
+                    streaming=False,
+                    faults=self._injectors.get(conversation_id, faults),
+                )
                 async with client:
                     task = await client.get_task(GetTaskRequest(id=task_id))
             except Exception as exc:
@@ -430,7 +444,11 @@ class ConversationService:
                     card, options.interface_url or agent.selected_interface_url
                 )
                 client = await open_client(
-                    card, iface, self._sink, streaming=options.stream, faults=options.faults
+                    card,
+                    iface,
+                    self._sink,
+                    streaming=options.stream,
+                    faults=self._injectors.get(conversation_id, options.faults),
                 )
                 async with client:
                     stream = client.send_message(

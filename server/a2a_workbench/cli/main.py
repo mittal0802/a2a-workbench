@@ -48,10 +48,11 @@ FaultsOpt = Annotated[
 def _faults(spec: str | None) -> Any:
     if spec is None:
         return None
+    from a2a_workbench.core.faults.injector import FaultInjector
     from a2a_workbench.core.faults.profile import load_profile
 
     try:
-        return load_profile(spec)
+        return FaultInjector(load_profile(spec))
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
@@ -293,7 +294,7 @@ def send(
         context_id=context_id,
         task_id=task_id,
         interface_url=interface,
-        faults=profile,
+        faults=profile.profile if profile else None,
     )
 
     async def go() -> ExitCode:
@@ -573,8 +574,8 @@ def faults_presets(as_json: JsonFlag = False) -> None:
 @faults_app.command("validate")
 def faults_validate(path: Annotated[Path, typer.Argument(help="Profile JSON file.")]) -> None:
     """Check that a fault profile file is valid."""
-    profile = _faults(str(path))
-    typer.echo(f"valid: {len(profile.rules)} rule(s)")
+    injector = _faults(str(path))
+    typer.echo(f"valid: {len(injector.profile.rules)} rule(s)")
 
 
 def main() -> None:

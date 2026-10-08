@@ -6,6 +6,7 @@ from a2a.types import AgentCard, AgentInterface
 from a2a_workbench.core.connection.grpc import build_grpc_channel_factory
 from a2a_workbench.core.connection.http import build_http_client
 from a2a_workbench.core.connection.recorder import ExchangeSink
+from a2a_workbench.core.faults.injector import FaultInjector, as_injector
 from a2a_workbench.core.faults.profile import FaultProfile
 
 SUPPORTED_BINDINGS = ("JSONRPC", "HTTP+JSON", "GRPC")
@@ -64,12 +65,13 @@ async def open_client(
     sink: ExchangeSink,
     *,
     streaming: bool,
-    faults: FaultProfile | None = None,
+    faults: FaultProfile | FaultInjector | None = None,
 ) -> Client:
     """Return an SDK client bound to ``iface``, recording all traffic to ``sink``.
 
     Streaming is used only when ``streaming`` is true and the card declares it.
-    ``faults`` injects that profile's failures beneath the SDK. Closing the
+    ``faults`` injects failures beneath the SDK; pass the same injector to
+    several clients to share its rule state. Closing the
     client closes its connections.
 
     Raises:
@@ -77,10 +79,11 @@ async def open_client(
     """
     if iface.protocol_binding not in SUPPORTED_BINDINGS:
         raise UnsupportedBindingError(f"{iface.protocol_binding} is not supported yet")
+    injector = as_injector(faults)
     config = ClientConfig(
         streaming=streaming,
-        httpx_client=build_http_client(sink, faults=faults, binding=iface.protocol_binding),
-        grpc_channel_factory=build_grpc_channel_factory(sink, faults=faults),
+        httpx_client=build_http_client(sink, faults=injector, binding=iface.protocol_binding),
+        grpc_channel_factory=build_grpc_channel_factory(sink, faults=injector),
         supported_protocol_bindings=[iface.protocol_binding],
     )
     return ClientFactory(config).create(card_for_interface(card, iface))
