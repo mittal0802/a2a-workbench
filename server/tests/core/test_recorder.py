@@ -110,3 +110,54 @@ async def test_each_exchange_is_recorded_once():
         r = await c.get("http://x/")
         await r.aclose()
     assert len(sink.items) == 1
+
+
+async def test_raw_deflate_body_still_reaches_caller_and_is_recorded():
+    import zlib
+
+    sink = Collector()
+    raw = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    body = raw.compress(b'{"d":1}') + raw.flush()
+
+    def handler(req):
+        return httpx.Response(200, content=body, headers={"content-encoding": "deflate"})
+
+    async with _client(handler, sink) as c:
+        r = await c.get("http://x/")
+    assert r.json() == {"d": 1}
+    assert sink.items[0].response_body == '{"d":1}'
+
+
+class RawTransport(httpx.AsyncBaseTransport):
+    """Returns undecoded bytes, as a real network transport does."""
+
+    def __init__(self, body, headers):
+        self.body, self.headers = body, headers
+
+    async def handle_async_request(self, request):
+        return httpx.Response(200, headers=self.headers, stream=httpx.ByteStream(self.body))
+
+
+async def test_corrupt_gzip_fails_the_caller_exactly_like_plain_httpx():
+    headers = {"content-encoding": "gzip"}
+    async with httpx.AsyncClient(transport=RawTransport(b"not gzip", headers)) as plain:
+        with pytest.raises(httpx.DecodingError):
+            await plain.get("http://x/")
+    sink = Collector()
+    transport = RecordingTransport(sink, RawTransport(b"not gzip", headers))
+    async with httpx.AsyncClient(transport=transport) as c:
+        with pytest.raises(httpx.DecodingError):
+            await c.get("http://x/")
+    assert "could not be decoded" in sink.items[0].response_body
+
+
+async def test_raw_deflate_over_raw_transport():
+    import zlib
+
+    raw = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    body = raw.compress(b'{"d":2}') + raw.flush()
+    sink = Collector()
+    transport = RecordingTransport(sink, RawTransport(body, {"content-encoding": "deflate"}))
+    async with httpx.AsyncClient(transport=transport) as c:
+        assert (await c.get("http://x/")).json() == {"d": 2}
+    assert sink.items[0].response_body == '{"d":2}'

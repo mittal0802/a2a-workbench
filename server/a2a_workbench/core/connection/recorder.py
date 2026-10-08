@@ -121,8 +121,10 @@ class _RecordingStream(httpx.AsyncByteStream):
         self._sink = sink
         self._is_sse = is_sse
         self._max = max_body_bytes
+        self._encoding = content_encoding.strip().lower()
         self._decoder = _decoder(content_encoding)
-        self._undecodable = bool(content_encoding.strip()) and self._decoder is None
+        self._undecodable = bool(self._encoding) and self._decoder is None
+        self._decode_error: str | None = None
         self._body = bytearray()
         self._sse_buffer = ""
         self._done = False
@@ -130,7 +132,11 @@ class _RecordingStream(httpx.AsyncByteStream):
     async def __aiter__(self) -> AsyncIterator[bytes]:
         try:
             async for chunk in self._inner:
-                self._capture(chunk)
+                try:
+                    self._capture(chunk)
+                except Exception as exc:  # the copy must never affect the caller
+                    self._decode_error = f"{type(exc).__name__}: {exc}"
+                    self._undecodable = True
                 yield chunk
         except Exception as exc:
             self._ex.error = f"{type(exc).__name__}: {exc}"
@@ -139,7 +145,7 @@ class _RecordingStream(httpx.AsyncByteStream):
     def _capture(self, chunk: bytes) -> None:
         if self._undecodable:
             return
-        data = self._decoder.decompress(chunk) if self._decoder else chunk
+        data = self._decompress(chunk) if self._decoder else chunk
         if self._is_sse:
             self._sse_buffer += data.decode("utf-8", errors="replace").replace("\r\n", "\n")
             while "\n\n" in self._sse_buffer:
@@ -151,6 +157,15 @@ class _RecordingStream(httpx.AsyncByteStream):
             if len(data) > room:
                 self._ex.truncated = True
             self._body.extend(data[: max(room, 0)])
+
+    def _decompress(self, chunk: bytes) -> bytes:
+        try:
+            return bytes(self._decoder.decompress(chunk))
+        except zlib.error:
+            if self._encoding != "deflate" or self._body or self._sse_buffer:
+                raise
+            self._decoder = zlib.decompressobj(-zlib.MAX_WBITS)
+            return bytes(self._decoder.decompress(chunk))
 
     def _elapsed(self) -> float:
         return round((time.perf_counter() - self._started) * 1000, 2)
@@ -167,7 +182,9 @@ class _RecordingStream(httpx.AsyncByteStream):
         self._done = True
         if self._is_sse and self._sse_buffer.strip():
             self._ex.frames.append(Frame(self._elapsed(), self._sse_buffer.strip()))
-        if self._undecodable:
+        if self._decode_error:
+            self._ex.response_body = f"(body could not be decoded: {self._decode_error})"
+        elif self._undecodable:
             self._ex.response_body = "(compressed body not decoded)"
         elif not self._is_sse:
             self._ex.response_body = self._body.decode("utf-8", errors="replace")
