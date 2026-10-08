@@ -107,3 +107,17 @@ async def test_http_faults_through_open_client(zoo):
                 [e async for e in c.send_message(_req("echo"))]
     assert classify_error(info.value)["category"] == "transport"
     assert sink[-1].fault == "refuse"
+
+
+async def test_grpc_drop_after_ms_fires_while_the_stream_is_silent(zoo):
+    import time
+
+    sink = Sink()
+    card, iface = await _grpc(zoo, sink)
+    faults = FaultProfile(rules=[FaultRule(kind="drop_stream", params={"after_ms": 300})])
+    start = time.monotonic()
+    async with await open_client(card, iface, sink, streaming=True, faults=faults) as client:
+        with pytest.raises(Exception) as info:
+            [e async for e in client.send_message(_req("stall 4"))]
+    assert time.monotonic() - start < 2
+    assert classify_error(info.value)["category"] == "transport"

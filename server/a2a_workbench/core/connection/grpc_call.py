@@ -1,5 +1,6 @@
 """A delegating grpc.aio server-streaming call with hooks on every read."""
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
@@ -8,15 +9,19 @@ import grpc
 MessageHook = Callable[[Any], Awaitable[Any]]
 EndHook = Callable[[BaseException | None], Awaitable[None]]
 BeforeReadHook = Callable[[], Awaitable[None]]
+ReadTimeout = Callable[[], float | None]
+TimeoutError_ = Callable[[], BaseException]
 
 
 class UnaryStreamCallProxy(grpc.aio.UnaryStreamCall):
     """Wraps a server-streaming call, passing each message through hooks.
 
-    ``before_read`` may raise to fail the next read, ``on_message`` sees (and
-    returns) every message, and ``on_end`` runs once with the terminating
-    exception or ``None`` at end of stream. Both ``read()`` and ``async for``
-    go through the hooks; every other method delegates to the wrapped call.
+    ``before_read`` may raise to fail the next read, ``read_timeout`` bounds
+    how long one read may block (raising ``on_timeout()`` when exceeded),
+    ``on_message`` sees (and returns) every message, and ``on_end`` runs once
+    with the terminating exception or ``None`` at end of stream. Both
+    ``read()`` and ``async for`` go through the hooks; every other method
+    delegates to the wrapped call.
     """
 
     def __init__(
@@ -26,8 +31,12 @@ class UnaryStreamCallProxy(grpc.aio.UnaryStreamCall):
         before_read: BeforeReadHook | None = None,
         on_message: MessageHook | None = None,
         on_end: EndHook | None = None,
+        read_timeout: ReadTimeout | None = None,
+        on_timeout: TimeoutError_ | None = None,
     ) -> None:
         self._call = call
+        self._read_timeout = read_timeout
+        self._on_timeout = on_timeout
         self._before_read = before_read
         self._on_message = on_message
         self._on_end = on_end
@@ -45,7 +54,15 @@ class UnaryStreamCallProxy(grpc.aio.UnaryStreamCall):
         try:
             if self._before_read is not None:
                 await self._before_read()
-            message = await self._call.read()
+            timeout = self._read_timeout() if self._read_timeout else None
+            if timeout is None:
+                message = await self._call.read()
+            else:
+                try:
+                    message = await asyncio.wait_for(self._call.read(), max(timeout, 0))
+                except TimeoutError:
+                    self._call.cancel()
+                    raise (self._on_timeout() if self._on_timeout else TimeoutError()) from None
             if message is grpc.aio.EOF:
                 await self._end(None)
                 return message

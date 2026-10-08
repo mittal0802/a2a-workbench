@@ -50,12 +50,23 @@ class _FaultStream(httpx.AsyncByteStream):
     async def _drop(self, params: dict[str, object]) -> AsyncIterator[bytes]:
         after_events = params.get("after_events")
         after_ms = params.get("after_ms")
-        started = time.monotonic()
+        deadline = time.monotonic() + after_ms / 1000 if isinstance(after_ms, int) else None
         if after_events == 0:
             raise httpx.ReadError("[injected] stream dropped")
         buffer = b""
         events = 0
-        async for chunk in self._inner:
+        chunks = self._inner.__aiter__()
+        while True:
+            try:
+                if deadline is None:
+                    chunk = await chunks.__anext__()
+                else:
+                    remaining = max(deadline - time.monotonic(), 0)
+                    chunk = await asyncio.wait_for(chunks.__anext__(), remaining)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                raise httpx.ReadError(f"[injected] stream dropped after {after_ms} ms") from None
             buffer += chunk.replace(b"\r\n", b"\n")
             while b"\n\n" in buffer:
                 frame, buffer = buffer.split(b"\n\n", 1)
@@ -63,8 +74,6 @@ class _FaultStream(httpx.AsyncByteStream):
                 events += 1
                 if isinstance(after_events, int) and events >= after_events:
                     raise httpx.ReadError(f"[injected] stream dropped after {events} events")
-            if isinstance(after_ms, int) and (time.monotonic() - started) * 1000 >= after_ms:
-                raise httpx.ReadError(f"[injected] stream dropped after {after_ms} ms")
         if buffer:
             yield buffer
 

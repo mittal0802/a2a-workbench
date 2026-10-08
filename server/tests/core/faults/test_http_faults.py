@@ -116,3 +116,28 @@ async def test_operation_from_scope_drives_matching():
 async def test_no_fault_passes_through_untouched():
     async with _client(FaultRule(kind="refuse", match={"operation": "never"})) as c:
         assert (await c.get("http://x/")).content == SSE
+
+
+class _SlowStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b'data: {"n":0}\n\n'
+        import asyncio
+
+        await asyncio.sleep(5)
+        yield b'data: {"n":1}\n\n'
+
+
+async def test_drop_after_ms_fires_while_the_stream_is_silent():
+    def handler(_r):
+        return httpx.Response(
+            200, stream=_SlowStream(), headers={"content-type": "text/event-stream"}
+        )
+
+    rule = FaultRule(kind="drop_stream", params={"after_ms": 150})
+    start = time.monotonic()
+    async with _client(rule, handler) as c:
+        with pytest.raises(httpx.ReadError):
+            async with c.stream("GET", "http://x/") as r:
+                async for _ in r.aiter_bytes():
+                    pass
+    assert time.monotonic() - start < 1.5

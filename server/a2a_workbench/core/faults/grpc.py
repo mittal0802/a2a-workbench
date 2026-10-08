@@ -134,4 +134,20 @@ class FaultGrpcInterceptor(
             delivered += 1
             return message
 
-        return UnaryStreamCallProxy(call, before_read=before_read, on_message=on_message)
+        def read_timeout() -> float | None:
+            if not isinstance(after_ms, int):
+                return None
+            return after_ms / 1000 - (time.monotonic() - started)
+
+        def on_timeout() -> BaseException:
+            return _rpc_error(
+                grpc.StatusCode.UNAVAILABLE, f"[injected] stream dropped after {after_ms} ms"
+            )
+
+        return UnaryStreamCallProxy(
+            call,
+            before_read=before_read,
+            on_message=on_message,
+            read_timeout=read_timeout,
+            on_timeout=on_timeout,
+        )
