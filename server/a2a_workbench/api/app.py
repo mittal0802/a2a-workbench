@@ -14,6 +14,7 @@ from a2a_workbench.api import (
     routes_agents,
     routes_conversations,
     routes_misc,
+    routes_oauth,
     routes_security,
     routes_tasks,
     ws,
@@ -58,6 +59,7 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
         routes_conversations,
         routes_tasks,
         routes_security,
+        routes_oauth,
         ws,
     ):
         app.include_router(module.router)
@@ -73,7 +75,7 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str) -> Response:
-        if path == "api" or path.startswith(("api/", "ws")):
+        if path == "api" or path.startswith(("api/", "ws", "oauth/")):
             return error_response(404, {"category": "workbench", "message": "not found"})
         candidate = (root / path).resolve()
         if path and candidate.is_file() and root in candidate.parents:
