@@ -36,6 +36,26 @@ agents_app = typer.Typer(no_args_is_help=True, help="Manage registered agents.")
 app.add_typer(agents_app, name="agents")
 tasks_app = typer.Typer(no_args_is_help=True, help="Get, list, cancel and resubscribe to tasks.")
 app.add_typer(tasks_app, name="tasks")
+faults_app = typer.Typer(no_args_is_help=True, help="Fault profiles for failure injection.")
+app.add_typer(faults_app, name="faults")
+
+FaultsOpt = Annotated[
+    str | None,
+    typer.Option("--faults", help="Inject failures: a preset name or a profile JSON file."),
+]
+
+
+def _faults(spec: str | None) -> Any:
+    if spec is None:
+        return None
+    from a2a_workbench.core.faults.profile import load_profile
+
+    try:
+        return load_profile(spec)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+
 
 JsonFlag = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 
@@ -242,9 +262,11 @@ def send(
     context_id: Annotated[str | None, typer.Option()] = None,
     task_id: Annotated[str | None, typer.Option()] = None,
     interface: Annotated[str | None, typer.Option(help="Interface URL to use.")] = None,
+    faults: FaultsOpt = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Send a message and print every resulting event (NDJSON with --json)."""
+    profile = _faults(faults)
     meta = _parse_json(metadata, "--metadata")
     data_value = _parse_json(data, "--data")
     parts: list[AnyPartInput] = [TextPartInput(text=text)]
@@ -271,6 +293,7 @@ def send(
         context_id=context_id,
         task_id=task_id,
         interface_url=interface,
+        faults=profile,
     )
 
     async def go() -> ExitCode:
@@ -285,7 +308,7 @@ def send(
                 else:
                     for line in printer.feed(event):
                         typer.echo(line)
-                if event.kind == "error":
+                if event.kind in ("error", "connection_lost"):
                     code = exit_code_for(event.data["category"])
             if not as_json:
                 for line in printer.finish():
@@ -373,9 +396,11 @@ def tasks_list(
     all_pages: Annotated[
         bool, typer.Option("--all", help="Follow next_page_token to the end.")
     ] = False,
+    faults: FaultsOpt = None,
     as_json: JsonFlag = False,
 ) -> None:
     """List tasks with every ListTasks filter."""
+    profile = _faults(faults)
     from datetime import datetime
 
     from pydantic import ValidationError
@@ -400,11 +425,13 @@ def tasks_list(
         async with Workbench.open(Settings()) as wb:
             agent_id = await _agent_id(wb, target, as_json)
             try:
-                page = await wb.tasks.list(agent_id, f)
+                page = await wb.tasks.list(agent_id, f, faults=profile)
                 tasks = list(page["tasks"])
                 while all_pages and page.get("next_page_token"):
                     page = await wb.tasks.list(
-                        agent_id, f.model_copy(update={"page_token": page["next_page_token"]})
+                        agent_id,
+                        f.model_copy(update={"page_token": page["next_page_token"]}),
+                        faults=profile,
                     )
                     tasks += page["tasks"]
             except AgentCallError as exc:
@@ -427,15 +454,20 @@ def tasks_get(
     target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
     task_id: str,
     history_length: Annotated[int | None, typer.Option(min=0)] = None,
+    faults: FaultsOpt = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Get one task (GetTask)."""
+    profile = _faults(faults)
 
     async def go() -> dict[str, Any]:
         async with Workbench.open(Settings()) as wb:
             try:
                 return await wb.tasks.get(
-                    await _agent_id(wb, target, as_json), task_id, history_length=history_length
+                    await _agent_id(wb, target, as_json),
+                    task_id,
+                    history_length=history_length,
+                    faults=profile,
                 )
             except AgentCallError as exc:
                 _task_call_failed(exc, as_json)
@@ -454,16 +486,18 @@ def tasks_cancel(
     target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
     task_id: str,
     metadata: Annotated[str | None, typer.Option(help="CancelTask metadata as JSON.")] = None,
+    faults: FaultsOpt = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Cancel a task (CancelTask)."""
     meta = _parse_json(metadata, "--metadata")
+    profile = _faults(faults)
 
     async def go() -> dict[str, Any]:
         async with Workbench.open(Settings()) as wb:
             try:
                 return await wb.tasks.cancel(
-                    await _agent_id(wb, target, as_json), task_id, metadata=meta
+                    await _agent_id(wb, target, as_json), task_id, metadata=meta, faults=profile
                 )
             except AgentCallError as exc:
                 _task_call_failed(exc, as_json)
@@ -476,15 +510,17 @@ def tasks_cancel(
 def tasks_subscribe(
     target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
     task_id: str,
+    faults: FaultsOpt = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Resubscribe to a task's event stream (SubscribeToTask); NDJSON with --json."""
+    profile = _faults(faults)
 
     async def go() -> None:
         async with Workbench.open(Settings()) as wb:
             agent_id = await _agent_id(wb, target, as_json)
             try:
-                async for event in wb.tasks.subscribe(agent_id, task_id):
+                async for event in wb.tasks.subscribe(agent_id, task_id, faults=profile):
                     if as_json:
                         print_json(event)
                     else:
@@ -495,6 +531,25 @@ def tasks_subscribe(
                 _task_call_failed(exc, as_json)
 
     _run(go())
+
+
+@faults_app.command("presets")
+def faults_presets(as_json: JsonFlag = False) -> None:
+    """List the built-in fault presets."""
+    from a2a_workbench.core.faults.profile import PRESETS
+
+    if as_json:
+        print_json([p.model_dump(mode="json") for p in PRESETS.values()])
+        return
+    for p in PRESETS.values():
+        typer.echo(f"{p.name:<14} {p.description}")
+
+
+@faults_app.command("validate")
+def faults_validate(path: Annotated[Path, typer.Argument(help="Profile JSON file.")]) -> None:
+    """Check that a fault profile file is valid."""
+    profile = _faults(str(path))
+    typer.echo(f"valid: {len(profile.rules)} rule(s)")
 
 
 def main() -> None:
