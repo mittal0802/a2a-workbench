@@ -38,6 +38,8 @@ tasks_app = typer.Typer(no_args_is_help=True, help="Get, list, cancel and resubs
 app.add_typer(tasks_app, name="tasks")
 faults_app = typer.Typer(no_args_is_help=True, help="Fault profiles for failure injection.")
 app.add_typer(faults_app, name="faults")
+auth_app = typer.Typer(no_args_is_help=True, help="Sign in to agents and check enforcement.")
+app.add_typer(auth_app, name="auth")
 
 FaultsOpt = Annotated[
     str | None,
@@ -586,6 +588,248 @@ def faults_validate(path: Annotated[Path, typer.Argument(help="Profile JSON file
     """Check that a fault profile file is valid."""
     injector = _faults(str(path))
     typer.echo(f"valid: {len(injector.profile.rules)} rule(s)")
+
+
+def _auth_failed(exc: Exception, as_json: bool) -> NoReturn:
+    from a2a_workbench.core.auth.service import CredentialError
+
+    if isinstance(exc, AgentCallError):
+        _task_call_failed(exc, as_json)
+    if isinstance(exc, CredentialError):
+        _fail("workbench", str(exc), as_json, ExitCode.USAGE)
+    raise exc
+
+
+@auth_app.command("status")
+def auth_status(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Show the agent's security schemes and whether you are signed in."""
+    from a2a_workbench.core.a2a_json import card_from_json
+
+    async def go() -> Any:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            row = await wb.agents.row(agent.id)
+            return await wb.auth.overview(agent.id, card_from_json(row.card))
+
+    overview = _run(go())
+    if as_json:
+        print_json(overview.model_dump(mode="json"))
+        return
+    typer.echo(f"status: {overview.status}")
+    for scheme in overview.schemes:
+        cred = scheme.credential.preview if scheme.credential else "not set"
+        flows = f" [{', '.join(scheme.flows)}]" if scheme.flows else ""
+        typer.echo(f"  {scheme.name:<16} {scheme.label}{flows}: {cred}")
+    if overview.missing:
+        typer.echo(f"missing: {', '.join(overview.missing)}")
+
+
+@auth_app.command("set")
+def auth_set(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    scheme: Annotated[str, typer.Argument(help="Security scheme name from the card.")],
+    api_key: Annotated[str | None, typer.Option(help="API key value.")] = None,
+    username: Annotated[str | None, typer.Option()] = None,
+    password: Annotated[str | None, typer.Option()] = None,
+    token: Annotated[str | None, typer.Option(help="Bearer token.")] = None,
+    access_token: Annotated[
+        str | None, typer.Option(help="OAuth access token you already have.")
+    ] = None,
+    cert: Annotated[Path | None, typer.Option(help="Client certificate PEM file.")] = None,
+    key: Annotated[Path | None, typer.Option(help="Client private key PEM file.")] = None,
+    ca: Annotated[Path | None, typer.Option(help="CA PEM file to trust.")] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Store a credential for one of the agent's security schemes."""
+    from a2a_workbench.core.a2a_json import card_from_json
+
+    if api_key:
+        kind, secret = "api_key", {"value": api_key}
+    elif username or password:
+        kind, secret = "http_basic", {"username": username or "", "password": password or ""}
+    elif token:
+        kind, secret = "http_bearer", {"token": token}
+    elif access_token:
+        kind, secret = "oauth2", {"access_token": access_token}
+    elif cert and key:
+        kind = "mtls"
+        secret = {"cert_pem": cert.read_text(), "key_pem": key.read_text()}
+        if ca:
+            secret["ca_pem"] = ca.read_text()
+    else:
+        typer.echo(
+            "give --api-key, --username/--password, --token, --access-token or --cert/--key",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE)
+
+    async def go() -> Any:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            row = await wb.agents.row(agent.id)
+            card = card_from_json(row.card)
+            if kind == "http_bearer" and scheme in card.security_schemes:
+                accepts = card.security_schemes[scheme].WhichOneof("scheme")
+                if accepts in ("oauth2_security_scheme", "open_id_connect_security_scheme"):
+                    return await wb.auth.set_credential(
+                        agent.id, card, scheme, "oauth2", {"access_token": token}
+                    )
+            try:
+                return await wb.auth.set_credential(agent.id, card, scheme, kind, secret)
+            except Exception as exc:
+                _auth_failed(exc, as_json)
+
+    info = _run(go())
+    print_json(info.model_dump(mode="json")) if as_json else typer.echo(
+        f"Saved {scheme}: {info.preview}"
+    )
+
+
+@auth_app.command("login")
+def auth_login(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    scheme: Annotated[str, typer.Argument(help="OAuth2 / OpenID Connect scheme name.")],
+    client_id: Annotated[str, typer.Option(help="OAuth client id.")],
+    client_secret: Annotated[str | None, typer.Option(help="OAuth client secret.")] = None,
+    scope: Annotated[list[str] | None, typer.Option("--scope", help="Scope to request.")] = None,
+    username: Annotated[str | None, typer.Option(help="For the password flow.")] = None,
+    password: Annotated[str | None, typer.Option(help="For the password flow.")] = None,
+    auth_method: Annotated[
+        str, typer.Option(help="client_secret_post or client_secret_basic.")
+    ] = "client_secret_post",
+    redirect_port: Annotated[int, typer.Option(help="Local port for the browser callback.")] = 8765,
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Print the URL only.")] = False,
+    url_file: Annotated[Path | None, typer.Option(hidden=True)] = None,
+    timeout: Annotated[
+        float, typer.Option(help="Seconds to wait for browser/device sign-in.")
+    ] = 300,
+    as_json: JsonFlag = False,
+) -> None:
+    """Sign in with the scheme's OAuth flow (direct, device code or browser)."""
+    from a2a_workbench.cli.oauth_callback import CallbackServer
+    from a2a_workbench.core.a2a_json import card_from_json
+
+    async def go() -> Any:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            card = card_from_json((await wb.agents.row(agent.id)).card)
+            try:
+                flow = wb.auth._single_flow(card, scheme)
+                if flow in ("client_credentials", "password"):
+                    return await wb.auth.sign_in(
+                        agent.id,
+                        scheme,
+                        flow=flow,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        scopes=scope or [],
+                        auth_method=auth_method,
+                        username=username,
+                        password=password,
+                        card=card,
+                    )
+                if flow == "device_code":
+                    device = await wb.auth.start_device_flow(
+                        agent.id,
+                        scheme,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        scopes=scope or [],
+                        card=card,
+                    )
+                    typer.echo(
+                        f"To sign in, open {device.verification_uri} "
+                        f"and enter code: {device.user_code}",
+                        err=True,
+                    )
+                    deadline = asyncio.get_running_loop().time() + timeout
+                    while asyncio.get_running_loop().time() < deadline:
+                        if await wb.auth.poll_device_flow(device.flow_id) == "signed_in":
+                            return await wb.credentials.list(agent.id)
+                        await asyncio.sleep(max(device.interval, 0.2))
+                    _fail("auth", "device sign-in timed out", as_json, ExitCode.AUTH)
+                with CallbackServer(redirect_port) as callback:
+                    start = await wb.auth.start_browser_flow(
+                        agent.id,
+                        scheme,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        scopes=scope or [],
+                        redirect_uri=callback.redirect_uri,
+                        card=card,
+                    )
+                    typer.echo(f"Open this URL to sign in:\n{start.authorize_url}", err=True)
+                    if url_file:
+                        url_file.write_text(start.authorize_url)
+                    if not no_browser:
+                        webbrowser.open(start.authorize_url)
+                    params = await asyncio.to_thread(callback.wait, timeout)
+                if params is None:
+                    _fail("auth", "browser sign-in timed out", as_json, ExitCode.AUTH)
+                return await wb.auth.finish_browser_flow(
+                    state=params.get("state", ""),
+                    code=params.get("code"),
+                    access_token=params.get("access_token"),
+                    expires_in=int(params["expires_in"]) if params.get("expires_in") else None,
+                    scope=params.get("scope"),
+                    error=params.get("error"),
+                    error_description=params.get("error_description"),
+                )
+            except Exception as exc:
+                _auth_failed(exc, as_json)
+
+    result = _run(go())
+    if isinstance(result, list):
+        result = next(i for i in result if i.scheme_name == scheme)
+    if as_json:
+        print_json(result.model_dump(mode="json"))
+    else:
+        typer.echo(f"Signed in to {scheme}: {result.preview}")
+
+
+@auth_app.command("logout")
+def auth_logout(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    scheme: Annotated[str, typer.Argument(help="Security scheme name.")],
+) -> None:
+    """Remove the stored credential for a scheme."""
+
+    async def go() -> None:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, False)
+            await wb.credentials.delete(agent.id, scheme)
+
+    _run(go())
+    typer.echo(f"Signed out of {scheme}")
+
+
+@auth_app.command("probe")
+def auth_probe(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Check the agent enforces its declared authentication (exit 1 if a check fails)."""
+    from a2a_workbench.core.a2a_json import card_from_json
+
+    async def go() -> list[Any]:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            row = await wb.agents.row(agent.id)
+            return await wb.auth.probe(
+                agent.id, card_from_json(row.card), row.selected_interface_url
+            )
+
+    results = _run(go())
+    if as_json:
+        print_json([r.model_dump() for r in results])
+    else:
+        for r in results:
+            typer.echo(f"{r.outcome:<15} {r.title} — {r.detail}")
+    if any(r.outcome == "fail" for r in results):
+        raise typer.Exit(ExitCode.CHECKS_FAILED)
 
 
 def main() -> None:
