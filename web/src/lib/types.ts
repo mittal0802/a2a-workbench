@@ -95,6 +95,7 @@ export type ExchangeSummary = {
   duration_ms: number | null;
   error: string | null;
   frame_count: number;
+  complete?: boolean;
 };
 export type ExchangeRecord = ExchangeSummary & {
   request_headers: Record<string, string>;

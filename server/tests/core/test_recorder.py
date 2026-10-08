@@ -104,12 +104,21 @@ async def test_without_scope_operation_is_http():
     assert sink.items[0].operation == "http"
 
 
-async def test_each_exchange_is_recorded_once():
-    sink = Collector()
-    async with _client(lambda r: httpx.Response(200, json={}), sink) as c:
+async def test_each_exchange_is_completed_once():
+    completions = []
+
+    async def sink(ex):
+        if ex.complete:
+            completions.append(ex.id)
+
+    async with httpx.AsyncClient(
+        transport=RecordingTransport(
+            sink, httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        )
+    ) as c:
         r = await c.get("http://x/")
         await r.aclose()
-    assert len(sink.items) == 1
+    assert len(completions) == 1
 
 
 async def test_raw_deflate_body_still_reaches_caller_and_is_recorded():
@@ -161,3 +170,24 @@ async def test_raw_deflate_over_raw_transport():
     async with httpx.AsyncClient(transport=transport) as c:
         assert (await c.get("http://x/")).json() == {"d": 2}
     assert sink.items[0].response_body == '{"d":2}'
+
+
+async def test_stream_is_announced_at_start_and_completed_at_close():
+    snapshots = []
+
+    async def sink(ex):
+        snapshots.append((ex.complete, len(ex.frames), ex.status))
+
+    body = b'data: {"a":1}\n\ndata: {"a":2}\n\n'
+
+    def handler(req):
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    async with httpx.AsyncClient(
+        transport=RecordingTransport(sink, httpx.MockTransport(handler))
+    ) as c:
+        async with c.stream("POST", "http://x/a2a", json={}) as r:
+            assert snapshots == [(False, 0, 200)]
+            async for _ in r.aiter_bytes():
+                pass
+    assert snapshots[-1] == (True, 2, 200)

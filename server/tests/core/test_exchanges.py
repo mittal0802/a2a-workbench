@@ -28,3 +28,27 @@ async def test_store_persists_and_publishes(tmp_path):
     assert [e["id"] for e in await store.list(conversation_id="c1")] == ["e1"]
     assert await store.get("missing") is None
     await db.dispose()
+
+
+async def test_store_upserts_in_flight_exchange(tmp_path):
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'y.db'}")
+    await db.create_schema()
+    store = ExchangeStore(db, EventBus())
+    ex = Exchange(
+        id="e2",
+        operation="send_message",
+        http_method="POST",
+        url="http://x",
+        started_at=datetime.now(UTC),
+        conversation_id="c2",
+        status=200,
+        complete=False,
+    )
+    await store(ex)
+    assert (await store.list(conversation_id="c2"))[0]["complete"] is False
+    ex.complete = True
+    ex.duration_ms = 5.0
+    await store(ex)
+    listed = await store.list(conversation_id="c2")
+    assert len(listed) == 1 and listed[0]["complete"] is True and listed[0]["duration_ms"] == 5.0
+    await db.dispose()

@@ -71,3 +71,13 @@ describe("InspectDrawer", () => {
     expect(await screen.findAllByText(/ConnectError: refused/)).not.toHaveLength(0);
   });
 });
+
+describe("InspectDrawer live updates", () => {
+  it("marks in-flight exchanges and recovers from a missing record", async () => {
+    vi.spyOn(api, "listExchanges").mockResolvedValue([{ ...summary, complete: false, duration_ms: null }]);
+    vi.spyOn(api, "getExchange").mockRejectedValue(new Error("not found"));
+    renderDrawer("e1");
+    expect(await screen.findByText(/in progress/i)).toBeInTheDocument();
+    expect(await screen.findByText(/not recorded yet/i)).toBeInTheDocument();
+  });
+});

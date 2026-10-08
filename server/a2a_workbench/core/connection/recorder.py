@@ -47,6 +47,7 @@ class Exchange:
     truncated: bool = False
     agent_id: str | None = None
     conversation_id: str | None = None
+    complete: bool = True
 
     def to_record(self) -> dict[str, Any]:
         """Return a JSON-serializable dict of every field."""
@@ -189,14 +190,17 @@ class _RecordingStream(httpx.AsyncByteStream):
         elif not self._is_sse:
             self._ex.response_body = self._body.decode("utf-8", errors="replace")
         self._ex.duration_ms = self._elapsed()
+        self._ex.complete = True
         await self._sink(self._ex)
 
 
 class RecordingTransport(httpx.AsyncBaseTransport):
     """httpx transport that records each request and response it carries.
 
-    Bytes reach the caller unmodified. A record is handed to ``sink`` once the
-    response body is closed, or immediately when the request fails.
+    Bytes reach the caller unmodified. The record is handed to ``sink`` with
+    ``complete=False`` when response headers arrive and again with
+    ``complete=True`` once the body is closed; a failed request is handed over
+    once, complete.
     """
 
     def __init__(
@@ -236,6 +240,8 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             raise
         exchange.status = response.status_code
         exchange.response_headers = redact_headers(response.headers)
+        exchange.complete = False
+        await self._sink(exchange)
         stream = _RecordingStream(
             response.stream,  # type: ignore[arg-type]
             exchange,

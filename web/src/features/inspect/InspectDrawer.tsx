@@ -73,7 +73,16 @@ function Headers({ title, headers }: { title: string; headers: Record<string, st
 
 function Detail({ id }: { id: string }) {
   const [view, setView] = useState<"Request" | "Response" | "Headers">("Request");
-  const ex = useQuery({ queryKey: ["exchange", id], queryFn: () => api.getExchange(id) });
+  const ex = useQuery({ queryKey: ["exchange", id], queryFn: () => api.getExchange(id), retry: false });
+  if (ex.isError)
+    return (
+      <div className="dbody no">
+        This request is not recorded yet. It appears here as soon as the agent answers.{" "}
+        <button className="try" onClick={() => ex.refetch()}>
+          Retry
+        </button>
+      </div>
+    );
   if (!ex.data) return <div className="dbody no">Loading…</div>;
   const r = ex.data;
   return (
@@ -92,7 +101,8 @@ function Detail({ id }: { id: string }) {
         </button>
       </div>
       <div className="mono" style={{ marginBottom: 8, wordBreak: "break-all" }}>
-        {r.http_method} {r.url} → {r.status ?? "no response"} · {r.duration_ms ?? "?"} ms
+        {r.http_method} {r.url} → {r.status ?? "no response"} ·{" "}
+        {r.complete === false ? "in progress" : `${r.duration_ms ?? "?"} ms`}
       </div>
       {r.error && (
         <div className="note bad">
@@ -155,9 +165,13 @@ export function InspectDrawer({
     if (!conversationId || !open) return;
     return getHub().subscribe(`exchanges:${conversationId}`, 0, (msg) => {
       if (msg.type !== "exchange") return;
+      const incoming = msg.exchange as ExchangeSummary;
       qc.setQueryData<ExchangeSummary[]>(["exchanges", conversationId], (prev = []) =>
-        prev.some((e) => e.id === (msg.exchange as ExchangeSummary).id) ? prev : [...prev, msg.exchange as ExchangeSummary],
+        prev.some((e) => e.id === incoming.id)
+          ? prev.map((e) => (e.id === incoming.id ? incoming : e))
+          : [...prev, incoming],
       );
+      qc.invalidateQueries({ queryKey: ["exchange", incoming.id] });
     });
   }, [conversationId, open, qc]);
 
@@ -189,7 +203,8 @@ export function InspectDrawer({
               {friendlyOperation(e)}
               {e.error && <small style={{ marginLeft: 6 }}>{e.error}</small>}
               <span className="ms">
-                {e.status ?? "—"} · {e.duration_ms !== null ? `${Math.round(e.duration_ms)}ms` : "…"}
+                {e.status ?? "—"} ·{" "}
+                {e.complete === false ? "in progress" : e.duration_ms !== null ? `${Math.round(e.duration_ms)}ms` : "…"}
               </span>
             </button>
           ))}

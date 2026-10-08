@@ -20,6 +20,7 @@ _SUMMARY_KEYS = (
     "error",
     "agent_id",
     "conversation_id",
+    "complete",
 )
 
 
@@ -38,10 +39,10 @@ class ExchangeStore:
         self._bus = bus
 
     async def __call__(self, exchange: Exchange) -> None:
-        """Persist ``exchange`` and publish its summary."""
+        """Persist ``exchange``, replacing any earlier record of it, and publish its summary."""
         record = exchange.to_record()
         async with self._db.sessions() as session:
-            session.add(
+            await session.merge(
                 ExchangeRow(
                     id=exchange.id,
                     agent_id=exchange.agent_id,
