@@ -86,6 +86,27 @@ class CredentialError(ValueError):
     """Raised when a credential does not fit the scheme it is stored for."""
 
 
+class BrowserStart(BaseModel):
+    """Where to send the user's browser to sign in, and the state that ties it back."""
+
+    authorize_url: str
+    state: str
+
+
+class DeviceStart(BaseModel):
+    """A started device sign-in: the code the user enters and where."""
+
+    flow_id: str
+    user_code: str
+    verification_uri: str
+    verification_uri_complete: str | None = None
+    interval: int = 5
+    expires_in: int | None = None
+
+
+PENDING_TTL_S = 600
+
+
 _FLOW_FIELDS = {
     "client_credentials": "client_credentials",
     "authorization_code": "authorization_code",
@@ -114,6 +135,247 @@ class AuthService:
     def __init__(self, credentials: CredentialStore, sink: Any = None) -> None:
         self.credentials = credentials
         self._sink = sink
+        self._pending: dict[str, dict[str, Any]] = {}
+
+    def _remember(self, key: str, data: dict[str, Any]) -> None:
+        import time
+
+        now = time.time()
+        for k in [k for k, v in self._pending.items() if v["created"] + PENDING_TTL_S < now]:
+            self._pending.pop(k, None)
+        self._pending[key] = {**data, "created": now}
+
+    def _take(self, key: str, *, keep: bool = False) -> dict[str, Any]:
+        import time
+
+        data = self._pending.get(key)
+        if data is None or data["created"] + PENDING_TTL_S < time.time():
+            self._pending.pop(key, None)
+            raise CredentialError("this sign-in attempt is unknown or has expired; start again")
+        if not keep:
+            self._pending.pop(key, None)
+        return data
+
+    def _single_flow(self, card: AgentCard, scheme_name: str) -> str:
+        if scheme_name not in card.security_schemes:
+            raise CredentialError(f"the agent card declares no scheme named '{scheme_name}'")
+        flows = oauth_flows(card.security_schemes[scheme_name])
+        if (
+            card.security_schemes[scheme_name].WhichOneof("scheme")
+            == "open_id_connect_security_scheme"
+        ):
+            return "authorization_code"
+        if not flows:
+            raise CredentialError(f"'{scheme_name}' is not an OAuth 2.0 scheme")
+        return next(iter(flows))
+
+    async def start_browser_flow(
+        self,
+        agent_id: str,
+        scheme_name: str,
+        *,
+        client_id: str,
+        scopes: list[str],
+        redirect_uri: str,
+        card: AgentCard,
+        client_secret: str | None = None,
+    ) -> BrowserStart:
+        """Prepare an authorization code (always with PKCE S256) or implicit sign-in.
+
+        Raises:
+            CredentialError: if the scheme has no browser flow or no authorization URL.
+        """
+        import secrets as _secrets
+
+        from a2a_workbench.core.auth import oauth
+
+        flow = self._single_flow(card, scheme_name)
+        if flow not in ("authorization_code", "implicit"):
+            raise CredentialError(f"'{scheme_name}' uses {flow}, not a browser sign-in")
+        endpoints = await self.endpoints(card, scheme_name, flow)
+        if not endpoints.get("authorization_url"):
+            raise CredentialError(f"no authorization URL known for '{scheme_name}'")
+        state = _secrets.token_urlsafe(24)
+        verifier, challenge = oauth.pkce_pair() if flow == "authorization_code" else (None, None)
+        self._remember(
+            state,
+            {
+                "agent_id": agent_id,
+                "scheme": scheme_name,
+                "flow": flow,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scopes": scopes,
+                "redirect_uri": redirect_uri,
+                "verifier": verifier,
+                "token_url": endpoints.get("token_url"),
+            },
+        )
+        url = oauth.authorize_url(
+            endpoints["authorization_url"],
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            scopes=scopes,
+            state=state,
+            response_type="code" if flow == "authorization_code" else "token",
+            code_challenge=challenge,
+        )
+        return BrowserStart(authorize_url=url, state=state)
+
+    async def finish_browser_flow(
+        self,
+        *,
+        state: str,
+        code: str | None = None,
+        access_token: str | None = None,
+        expires_in: int | None = None,
+        scope: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+    ) -> CredentialInfo:
+        """Complete a browser sign-in from the callback (code) or implicit fragment (token).
+
+        Raises:
+            CredentialError: for an unknown or expired ``state``.
+            AgentCallError: if the provider reported an error or refused the code.
+        """
+        import time
+
+        from a2a_workbench.core.auth import oauth
+        from a2a_workbench.core.errors import AgentCallError
+
+        pending = self._take(state)
+        if error:
+            raise AgentCallError(
+                {"category": "auth", "reason": error, "message": error_description or error}
+            )
+        if pending["flow"] == "implicit":
+            if not access_token:
+                raise CredentialError("the provider returned no access token")
+            tokens = oauth.TokenSet(
+                access_token=access_token,
+                expires_at=time.time() + expires_in if expires_in else None,
+                scopes=scope.split() if scope else pending["scopes"],
+            )
+        else:
+            if not code:
+                raise CredentialError("the provider returned no authorization code")
+            try:
+                tokens = await oauth.exchange_code(
+                    pending["token_url"],
+                    code,
+                    pending["redirect_uri"],
+                    pending["client_id"],
+                    pending["client_secret"],
+                    pending["verifier"],
+                    pending["scopes"],
+                    self._sink,
+                )
+            except oauth.OAuthError as exc:
+                raise AgentCallError(
+                    {
+                        "category": "auth",
+                        "reason": exc.error,
+                        "http_status": exc.status,
+                        "message": "The token endpoint refused the code: "
+                        + (exc.description or exc.error),
+                    }
+                ) from exc
+        return await self.store_tokens(
+            pending["agent_id"],
+            pending["scheme"],
+            tokens,
+            flow=pending["flow"],
+            token_url=pending["token_url"],
+            client_id=pending["client_id"],
+            client_secret=pending["client_secret"],
+            auth_method="client_secret_post",
+        )
+
+    async def start_device_flow(
+        self,
+        agent_id: str,
+        scheme_name: str,
+        *,
+        client_id: str,
+        scopes: list[str],
+        card: AgentCard,
+        client_secret: str | None = None,
+    ) -> DeviceStart:
+        """Start a device code sign-in and return the code for the user."""
+        import secrets as _secrets
+
+        from a2a_workbench.core.auth import oauth
+        from a2a_workbench.core.errors import AgentCallError
+
+        flow = self._single_flow(card, scheme_name)
+        if flow != "device_code":
+            raise CredentialError(f"'{scheme_name}' uses {flow}, not device code")
+        endpoints = await self.endpoints(card, scheme_name, flow)
+        try:
+            body = await oauth.device_authorize(
+                endpoints["device_authorization_url"], client_id, scopes, self._sink
+            )
+        except (oauth.OAuthError, KeyError) as exc:
+            raise AgentCallError(
+                {"category": "auth", "message": f"device authorization failed: {exc}"}
+            ) from exc
+        flow_id = _secrets.token_urlsafe(16)
+        self._remember(
+            flow_id,
+            {
+                "agent_id": agent_id,
+                "scheme": scheme_name,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scopes": scopes,
+                "device_code": body["device_code"],
+                "token_url": endpoints.get("token_url"),
+            },
+        )
+        return DeviceStart(
+            flow_id=flow_id,
+            user_code=body["user_code"],
+            verification_uri=body["verification_uri"],
+            verification_uri_complete=body.get("verification_uri_complete"),
+            interval=int(body.get("interval", 5)),
+            expires_in=body.get("expires_in"),
+        )
+
+    async def poll_device_flow(self, flow_id: str) -> str:
+        """Poll a device sign-in once: ``pending``, ``signed_in``, or raise on failure."""
+        from a2a_workbench.core.auth import oauth
+        from a2a_workbench.core.errors import AgentCallError
+
+        pending = self._take(flow_id, keep=True)
+        try:
+            tokens = await oauth.device_poll(
+                pending["token_url"],
+                pending["device_code"],
+                pending["client_id"],
+                pending["client_secret"],
+                pending["scopes"],
+                self._sink,
+            )
+        except oauth.OAuthError as exc:
+            self._pending.pop(flow_id, None)
+            raise AgentCallError(
+                {"category": "auth", "reason": exc.error, "message": exc.description or exc.error}
+            ) from exc
+        if tokens is None:
+            return "pending"
+        self._pending.pop(flow_id, None)
+        await self.store_tokens(
+            pending["agent_id"],
+            pending["scheme"],
+            tokens,
+            flow="device_code",
+            token_url=pending["token_url"],
+            client_id=pending["client_id"],
+            client_secret=pending["client_secret"],
+            auth_method="client_secret_post",
+        )
+        return "signed_in"
 
     async def plan(
         self, agent_id: str, card: AgentCard, *, skill_id: str | None = None
