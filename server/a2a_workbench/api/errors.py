@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from a2a_workbench.core.auth.service import CredentialError
 from a2a_workbench.core.blobs import BlobNotFoundError, BlobTooLargeError
 from a2a_workbench.core.connection.cards import CardFetchError
 from a2a_workbench.core.connection.client import InterfaceNotFoundError
@@ -21,6 +22,7 @@ _STATUS: dict[type[Exception], int] = {
     AgentExistsError: 409,
     BlobTooLargeError: 413,
     InterfaceNotFoundError: 422,
+    CredentialError: 422,
 }
 
 

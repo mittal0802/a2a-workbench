@@ -14,6 +14,7 @@ from a2a_workbench.api import (
     routes_agents,
     routes_conversations,
     routes_misc,
+    routes_security,
     routes_tasks,
     ws,
 )
@@ -51,7 +52,14 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
         HostGuardMiddleware, hosts=allowed_hosts(settings.host, settings.extra_allowed_hosts)
     )
     install_error_handlers(app)
-    for module in (routes_misc, routes_agents, routes_conversations, routes_tasks, ws):
+    for module in (
+        routes_misc,
+        routes_agents,
+        routes_conversations,
+        routes_tasks,
+        routes_security,
+        ws,
+    ):
         app.include_router(module.router)
     _mount_spa(app, static_dir)
     return app
