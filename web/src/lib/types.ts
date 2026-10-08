@@ -109,7 +109,7 @@ export type ExchangeRecord = ExchangeSummary & {
 };
 export type PartInput =
   | { kind: "text"; text: string }
-  | { kind: "file"; blob_id?: string; url?: string; media_type?: string; filename?: string }
+  | { kind: "file"; blob_id?: string; url?: string; raw_base64?: string; media_type?: string; filename?: string }
   | { kind: "data"; data: unknown };
 export type SendOptions = {
   stream: boolean;
@@ -166,3 +166,22 @@ export type RecoveryData = {
   duplicate_events: number;
   terminal: boolean;
 };
+
+export type CredentialInfo = { scheme_name: string; kind: string; preview: string; readable: boolean; expires_at: string | null; updated_at: string };
+export type SchemeOverview = {
+  name: string;
+  type: "apiKey" | "http" | "oauth2" | "openIdConnect" | "mutualTLS" | "unknown";
+  label: string;
+  description: string;
+  details: Record<string, any>;
+  accepts: string[];
+  credential: CredentialInfo | null;
+};
+export type SecurityOverview = {
+  status: "not_required" | "signed_in" | "sign_in_needed";
+  schemes: SchemeOverview[];
+  requirements: string[][];
+  active: string[];
+  missing: string[];
+};
+export type CredentialInput = { kind: string } & Record<string, string>;

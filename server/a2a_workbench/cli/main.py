@@ -331,6 +331,12 @@ def fixtures(
     ] = None,
     no_grpc: Annotated[bool, typer.Option("--no-grpc", help="Do not serve gRPC.")] = False,
     legacy: Annotated[bool, typer.Option("--legacy", help="Speak A2A 0.3 instead of 1.0.")] = False,
+    auth: Annotated[
+        str,
+        typer.Option(
+            help="Require sign-in: apikey-header, apikey-query, apikey-cookie, basic, bearer, and."
+        ),
+    ] = "none",
 ) -> None:
     """Run the zoo reference agent until interrupted."""
     import uvicorn
@@ -345,7 +351,11 @@ def fixtures(
         + (" speaking A2A 0.3" if legacy else ""),
         err=True,
     )
-    app_ = build_zoo_app(base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy)
+    if auth != "none":
+        from a2a_workbench.fixtures.auth import ZOO_SECRETS
+
+        typer.echo(f"Sign-in required ({auth}); test credentials: {ZOO_SECRETS}", err=True)
+    app_ = build_zoo_app(base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy, auth=auth)
     uvicorn.run(app_, host=host, port=port)
 
 

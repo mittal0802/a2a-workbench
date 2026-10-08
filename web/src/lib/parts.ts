@@ -36,3 +36,13 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** Turn sent A2A parts back into composer inputs (to send the same message again). */
+export function toPartInputs(parts: A2APart[]): import("./types").PartInput[] {
+  return parts.map((p) => {
+    if (p.text !== undefined) return { kind: "text", text: p.text };
+    if (p.data !== undefined) return { kind: "data", data: p.data };
+    if (p.url !== undefined) return { kind: "file", url: p.url, media_type: p.mediaType, filename: p.filename };
+    return { kind: "file", raw_base64: p.raw, media_type: p.mediaType, filename: p.filename };
+  });
+}

@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { INTERRUPTED, RUNNING } from "../../lib/labels";
+import { toPartInputs } from "../../lib/parts";
 import { buildTurns } from "../../lib/timeline";
+import { DEFAULT_OPTIONS } from "../../lib/types";
 import type { Agent, PartInput, SendOptions } from "../../lib/types";
 import { Composer } from "./Composer";
 import { AgentBubble, UserBubble } from "./Turn";
@@ -15,7 +17,9 @@ export function ChatView({
   conversationId,
   onConversationChange,
   onInspect,
+  onOpenSecurity,
 }: {
+  onOpenSecurity?: () => void;
   agent: Agent;
   prefill?: string;
   conversationId: string | null;
@@ -88,6 +92,18 @@ export function ChatView({
                 turn={t}
                 agentName={agent.name}
                 onInspect={onInspect}
+                onSignIn={onOpenSecurity}
+                onRetry={() => {
+                  const prev = turns[i - 1];
+                  if (prev?.kind === "user")
+                    send.mutate({
+                      parts: toPartInputs(prev.event.data.message?.parts ?? []),
+                      options: { ...DEFAULT_OPTIONS, ...(prev.event.data.options ?? {}) },
+                    });
+                }}
+                onContinue={() =>
+                  send.mutate({ parts: [{ kind: "text", text: "I've signed in." }], options: DEFAULT_OPTIONS })
+                }
                 onResubscribe={() => resubscribe.mutate()}
                 onCheckStatus={() => checkStatus.mutate()}
               />

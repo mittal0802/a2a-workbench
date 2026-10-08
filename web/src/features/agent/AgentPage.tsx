@@ -6,12 +6,14 @@ import { api } from "../../lib/api";
 import { AboutView } from "../about/AboutView";
 import { ChatView } from "../chat/ChatView";
 import { InspectDrawer } from "../inspect/InspectDrawer";
+import { SecurityView } from "../security/SecurityView";
 import { TasksView } from "../tasks/TasksView";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
   { id: "chat", label: "Chat" },
   { id: "tasks", label: "Tasks" },
+  { id: "security", label: "Security" },
   { id: "about", label: "About" },
 ] as const;
 
@@ -21,6 +23,7 @@ export function AgentPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => api.getAgent(agentId) });
+  const security = useQuery({ queryKey: ["security", agentId], queryFn: () => api.security(agentId) });
   const [prefill, setPrefill] = useState<string | undefined>();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -45,10 +48,17 @@ export function AgentPage() {
       <div className="head">
         <Avatar name={a.name} size={36} />
         <h1>{a.name}</h1>
-        <span className="status">
-          <i />
-          Connected
-        </span>
+        {security.data?.status === "sign_in_needed" ? (
+          <Link to={`/agents/${a.id}/security`} className="state s-warn">
+            <i />
+            Sign-in needed
+          </Link>
+        ) : (
+          <span className="status">
+            <i />
+            {security.data?.status === "signed_in" ? "Signed in" : "Connected"}
+          </span>
+        )}
         <div className="spacer" />
         <ConnectionMenu agent={a} />
         <button className="btn" onClick={() => setInspecting(!inspecting)} aria-pressed={inspecting}>
@@ -79,6 +89,7 @@ export function AgentPage() {
             conversationId={conversationId}
             onConversationChange={changeConversation}
             onInspect={inspect}
+            onOpenSecurity={() => navigate(`/agents/${a.id}/security`)}
           />
           <InspectDrawer
             conversationId={conversationId}
@@ -97,6 +108,11 @@ export function AgentPage() {
                 navigate(`/agents/${a.id}/chat`);
               }}
             />
+          </section>
+        )}
+        {tab === "security" && (
+          <section className="view on">
+            <SecurityView agentId={a.id} />
           </section>
         )}
         <section className={`view ${tab === "about" ? "on" : ""}`}>

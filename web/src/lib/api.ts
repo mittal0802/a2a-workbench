@@ -8,6 +8,9 @@ import type {
   ExchangeSummary,
   PartInput,
   A2ATask,
+  CredentialInfo,
+  CredentialInput,
+  SecurityOverview,
   FaultProfile,
   SendOptions,
   TaskFilter,
@@ -86,6 +89,14 @@ export const api = {
   listExchanges: (conversationId: string) =>
     call<ExchangeSummary[]>(`/api/exchanges?conversation_id=${encodeURIComponent(conversationId)}`),
   getExchange: (id: string) => call<ExchangeRecord>(`/api/exchanges/${id}`),
+  security: (agentId: string) => call<SecurityOverview>(`/api/agents/${agentId}/security`),
+  putCredential: (agentId: string, scheme: string, body: CredentialInput) =>
+    call<CredentialInfo>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, {
+      method: "PUT",
+      body: json(body),
+    }),
+  deleteCredential: (agentId: string, scheme: string) =>
+    call<void>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, { method: "DELETE" }),
   faultPresets: () => call<FaultProfile[]>("/api/fault-presets"),
   listTasks: (agentId: string, filter: TaskFilter) => call<TaskPage>(`/api/agents/${agentId}/tasks${query(filter)}`),
   getTask: (agentId: string, taskId: string, history_length?: number) =>
