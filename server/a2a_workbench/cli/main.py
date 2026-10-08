@@ -533,6 +533,31 @@ def tasks_subscribe(
     _run(go())
 
 
+@app.command()
+def mcp(
+    transport: Annotated[
+        str, typer.Option(help="stdio (for Claude Code / Desktop) or streamable-http.")
+    ] = "stdio",
+    host: Annotated[str, typer.Option(help="Bind host for streamable-http.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port for streamable-http.")] = 8765,
+) -> None:
+    """Run the MCP server so AI agents (e.g. Claude Code) can test A2A agents."""
+    if transport not in ("stdio", "streamable-http"):
+        typer.echo("--transport must be stdio or streamable-http", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    from a2a_workbench.mcp.server import build_mcp_server
+
+    async def go() -> None:
+        async with Workbench.open(Settings()) as wb:
+            server = build_mcp_server(wb)
+            if transport == "stdio":
+                await server.run_stdio_async()
+            else:
+                await server.run_streamable_http_async(host=host, port=port)
+
+    _run(go())
+
+
 @faults_app.command("presets")
 def faults_presets(as_json: JsonFlag = False) -> None:
     """List the built-in fault presets."""
