@@ -52,3 +52,22 @@ async def test_store_upserts_in_flight_exchange(tmp_path):
     listed = await store.list(conversation_id="c2")
     assert len(listed) == 1 and listed[0]["complete"] is True and listed[0]["duration_ms"] == 5.0
     await db.dispose()
+
+
+async def test_summary_includes_injected_fault(tmp_path):
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'z.db'}")
+    await db.create_schema()
+    store = ExchangeStore(db, EventBus())
+    await store(
+        Exchange(
+            id="e3",
+            operation="send_message",
+            http_method="POST",
+            url="http://x",
+            started_at=datetime.now(UTC),
+            conversation_id="c3",
+            fault="drop_stream",
+        )
+    )
+    assert (await store.list(conversation_id="c3"))[0]["fault"] == "drop_stream"
+    await db.dispose()

@@ -81,3 +81,12 @@ describe("InspectDrawer live updates", () => {
     expect(await screen.findByText(/not recorded yet/i)).toBeInTheDocument();
   });
 });
+
+describe("InspectDrawer injected faults", () => {
+  it("labels exchanges whose failure was injected", async () => {
+    vi.spyOn(api, "listExchanges").mockResolvedValue([{ ...summary, fault: "drop_stream" }]);
+    vi.spyOn(api, "getExchange").mockResolvedValue({ ...record, fault: "drop_stream" });
+    renderDrawer();
+    expect(await screen.findByText("injected: drop_stream")).toBeInTheDocument();
+  });
+});

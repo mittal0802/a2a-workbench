@@ -2,6 +2,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { useState } from "react";
 import { Switch } from "../../components/Switch";
 import type { Agent, SendOptions } from "../../lib/types";
+import { NetworkConditions } from "./NetworkConditions";
 
 function ChipInput({
   label,
@@ -143,6 +144,8 @@ export function OptionsMenu({
             onChange={(others) => set({ extensions: [...value.extensions.filter((x) => declared.some((d) => d.uri === x)), ...others] })}
             placeholder="https://…"
           />
+          <h5>Network conditions</h5>
+          <NetworkConditions value={value.faults} onChange={(faults) => set({ faults })} />
           <h5>Advanced</h5>
           <div style={{ padding: "4px 10px 8px" }}>
             <label className="lbl2" style={{ fontSize: 12 }}>

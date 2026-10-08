@@ -8,6 +8,7 @@ import type {
   ExchangeSummary,
   PartInput,
   A2ATask,
+  FaultProfile,
   SendOptions,
   TaskFilter,
   TaskPage,
@@ -85,6 +86,7 @@ export const api = {
   listExchanges: (conversationId: string) =>
     call<ExchangeSummary[]>(`/api/exchanges?conversation_id=${encodeURIComponent(conversationId)}`),
   getExchange: (id: string) => call<ExchangeRecord>(`/api/exchanges/${id}`),
+  faultPresets: () => call<FaultProfile[]>("/api/fault-presets"),
   listTasks: (agentId: string, filter: TaskFilter) => call<TaskPage>(`/api/agents/${agentId}/tasks${query(filter)}`),
   getTask: (agentId: string, taskId: string, history_length?: number) =>
     call<A2ATask>(`/api/agents/${agentId}/tasks/${encodeURIComponent(taskId)}${query({ history_length })}`),

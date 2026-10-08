@@ -201,6 +201,11 @@ export function InspectDrawer({
                 {e.error ? "✕" : "↑"}
               </span>
               {friendlyOperation(e)}
+              {e.fault && (
+                <span className="tag" style={{ marginLeft: 6, background: "var(--amber-soft)", color: "var(--amber)" }}>
+                  injected: {e.fault}
+                </span>
+              )}
               {e.error && <small style={{ marginLeft: 6 }}>{e.error}</small>}
               <span className="ms">
                 {e.status ?? "—"} ·{" "}

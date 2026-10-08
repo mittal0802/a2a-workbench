@@ -21,6 +21,7 @@ _SUMMARY_KEYS = (
     "agent_id",
     "conversation_id",
     "complete",
+    "fault",
 )
 
 

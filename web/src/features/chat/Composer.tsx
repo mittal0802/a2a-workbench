@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/parts";
 import { DEFAULT_OPTIONS, type Agent, type PartInput, type SendOptions } from "../../lib/types";
+import { profileLabel } from "./NetworkConditions";
 import { OptionsMenu } from "./OptionsMenu";
 
 type Attachment = { blob_id: string; filename: string; media_type: string; size: number };
@@ -78,6 +79,18 @@ export function Composer({
 
   return (
     <div className="composer">
+      {options.faults && (
+        <div className="note warn" style={{ maxWidth: 760, margin: "0 auto 8px", alignItems: "center" }}>
+          <span className="i">!</span>
+          <div>
+            Network conditions: {profileLabel(options.faults)}
+            <small>Failures are injected beneath the SDK on every message until you turn this off.</small>
+          </div>
+          <button className="btn ghost" style={{ marginLeft: "auto" }} onClick={() => setOptions({ ...options, faults: null })}>
+            Turn off
+          </button>
+        </div>
+      )}
       <div className="cbox">
         {(files.length > 0 || urls.length > 0) && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 12px 0" }}>

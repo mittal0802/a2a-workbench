@@ -97,6 +97,7 @@ export type ExchangeSummary = {
   error: string | null;
   frame_count: number;
   complete?: boolean;
+  fault?: string | null;
 };
 export type ExchangeRecord = ExchangeSummary & {
   request_headers: Record<string, string>;
@@ -118,7 +119,10 @@ export type SendOptions = {
   extensions: string[];
   message_metadata: Record<string, unknown> | null;
   reference_task_ids: string[];
+  faults: FaultProfile | null;
 };
+export type FaultRule = { kind: string; mode?: string; probability?: number; params?: Record<string, unknown>; match?: Record<string, unknown> };
+export type FaultProfile = { name?: string; description?: string; rules: FaultRule[]; seed?: number };
 export const DEFAULT_OPTIONS: SendOptions = {
   stream: true,
   return_immediately: false,
@@ -127,6 +131,7 @@ export const DEFAULT_OPTIONS: SendOptions = {
   extensions: [],
   message_metadata: null,
   reference_task_ids: [],
+  faults: null,
 };
 
 export type A2ATask = {
