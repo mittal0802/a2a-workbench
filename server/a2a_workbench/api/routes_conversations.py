@@ -11,6 +11,7 @@ from a2a_workbench.api.deps import get_workbench
 from a2a_workbench.core.conversations.options import SendOptions
 from a2a_workbench.core.conversations.parts import PartInput
 from a2a_workbench.core.conversations.service import ConversationOut
+from a2a_workbench.core.faults.profile import FaultProfile
 from a2a_workbench.core.workbench import Workbench
 
 router = APIRouter(prefix="/api")
@@ -71,6 +72,36 @@ async def send_message(
 ) -> dict[str, bool]:
     await wb.conversations.get(conversation_id)
     _spawn(request, wb.conversations.send(conversation_id, body.parts, body.options))
+    return {"accepted": True}
+
+
+class ResubscribeIn(BaseModel):
+    force: bool = False
+    faults: FaultProfile | None = None
+
+
+@router.post("/conversations/{conversation_id}/resubscribe", status_code=202)
+async def resubscribe(
+    conversation_id: str,
+    request: Request,
+    body: ResubscribeIn | None = None,
+    wb: Workbench = Depends(get_workbench),
+) -> dict[str, bool]:
+    await wb.conversations.get(conversation_id)
+    body = body or ResubscribeIn()
+    _spawn(
+        request,
+        wb.conversations.resubscribe(conversation_id, faults=body.faults, force=body.force),
+    )
+    return {"accepted": True}
+
+
+@router.post("/conversations/{conversation_id}/check-status", status_code=202)
+async def check_status(
+    conversation_id: str, request: Request, wb: Workbench = Depends(get_workbench)
+) -> dict[str, bool]:
+    await wb.conversations.get(conversation_id)
+    _spawn(request, wb.conversations.check_status(conversation_id))
     return {"accepted": True}
 
 

@@ -65,3 +65,30 @@ def test_empty_parts_is_422(client, zoo):
 def test_unknown_conversation_is_404(client):
     assert client.get("/api/conversations/nope").status_code == 404
     assert client.post("/api/conversations", json={"agent_id": "nope"}).status_code == 404
+
+
+def test_resubscribe_and_check_status_endpoints(client, zoo):
+    _, conv = _agent_and_conv(client, zoo)
+    drop = {"rules": [{"kind": "drop_stream", "params": {"after_events": 3}}]}
+    client.post(
+        f"/api/conversations/{conv['id']}/messages",
+        json={"parts": [{"kind": "text", "text": "long"}], "options": {"faults": drop}},
+    )
+    _wait_for(client, conv["id"], lambda ev: ev and ev[-1]["kind"] == "connection_lost")
+    assert client.post(f"/api/conversations/{conv['id']}/resubscribe", json={}).status_code == 202
+    body = _wait_for(client, conv["id"], lambda ev: ev[-1]["kind"] == "recovered")
+    assert body["events"][-1]["data"]["snapshot_first"] is True
+    assert client.post(f"/api/conversations/{conv['id']}/check-status").status_code == 202
+    _wait_for(client, conv["id"], lambda ev: ev[-1]["data"].get("method") == "get_task")
+
+
+def test_send_with_invalid_fault_profile_is_422(client, zoo):
+    _, conv = _agent_and_conv(client, zoo)
+    r = client.post(
+        f"/api/conversations/{conv['id']}/messages",
+        json={
+            "parts": [{"kind": "text", "text": "x"}],
+            "options": {"faults": {"rules": [{"kind": "nope"}]}},
+        },
+    )
+    assert r.status_code == 422

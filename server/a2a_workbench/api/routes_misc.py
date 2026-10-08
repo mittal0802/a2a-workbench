@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from a2a_workbench import __version__
 from a2a_workbench.api.deps import get_workbench
 from a2a_workbench.core.blobs import BlobNotFoundError, BlobOut
+from a2a_workbench.core.faults.profile import PRESETS, FaultProfile
 from a2a_workbench.core.workbench import Workbench
 
 router = APIRouter(prefix="/api")
@@ -15,6 +16,11 @@ router = APIRouter(prefix="/api")
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@router.get("/fault-presets")
+async def fault_presets() -> list[FaultProfile]:
+    return list(PRESETS.values())
 
 
 @router.post("/blobs", status_code=201)
