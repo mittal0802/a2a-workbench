@@ -30,3 +30,11 @@ def custom_path_zoo():
 
     with ZooServer(card_path="/agents/zoo/card.json") as server:
         yield server
+
+
+@pytest.fixture(scope="session")
+def legacy_zoo():
+    from a2a_workbench.fixtures.runner import ZooServer
+
+    with ZooServer(legacy=True) as server:
+        yield server

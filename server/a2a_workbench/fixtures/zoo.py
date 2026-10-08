@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import grpc
+from a2a.compat.v0_3 import a2a_v0_3_pb2_grpc
+from a2a.compat.v0_3.grpc_handler import CompatGrpcHandler
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandlerV2, GrpcHandler
@@ -166,10 +168,13 @@ class ZooExecutor(AgentExecutor):
         await TaskUpdater(event_queue, context.task_id or "", context.context_id or "").cancel()
 
 
-def build_zoo_card(base_url: str, grpc_target: str | None = None) -> AgentCard:
+def build_zoo_card(
+    base_url: str, grpc_target: str | None = None, protocol_version: str = "1.0"
+) -> AgentCard:
     """Return the public card of the zoo agent served at ``base_url``.
 
-    ``grpc_target`` (``host:port``) adds a gRPC interface.
+    ``grpc_target`` (``host:port``) adds a gRPC interface; every interface
+    declares ``protocol_version``.
     """
     card = AgentCard(
         name="Zoo agent",
@@ -218,6 +223,8 @@ def build_zoo_card(base_url: str, grpc_target: str | None = None) -> AgentCard:
         card.supported_interfaces.append(
             AgentInterface(url=grpc_target, protocol_binding="GRPC", protocol_version="1.0")
         )
+    for iface in card.supported_interfaces:
+        iface.protocol_version = protocol_version
     return card
 
 
@@ -227,15 +234,17 @@ def build_zoo_app(
     signed: bool = True,
     card_path: str = "/.well-known/agent-card.json",
     grpc_port: int | None = None,
+    legacy: bool = False,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
     With ``grpc_port``, the app's lifespan also serves the agent over gRPC on
-    that port of the base URL's host.
+    that port of the base URL's host. With ``legacy``, the card declares A2A
+    0.3 and every binding is served through the SDK's v0.3 compatibility layer.
     """
     host = base_url.split("://", 1)[1].split(":", 1)[0]
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
-    card = build_zoo_card(base_url, grpc_target)
+    card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
     private_key = ec.generate_private_key(ec.SECP256R1())
     jwk = json.loads(ECAlgorithm.to_jwk(private_key.public_key()))
     jwk.update({"kid": KEY_ID, "alg": "ES256", "use": "sig"})
@@ -261,8 +270,8 @@ def build_zoo_app(
     routes = [
         *create_agent_card_routes(card, card_url=card_path),
         Route("/.well-known/jwks.json", jwks),
-        *create_jsonrpc_routes(handler, "/a2a"),
-        *create_rest_routes(handler, path_prefix="/v1"),
+        *create_jsonrpc_routes(handler, "/a2a", enable_v0_3_compat=legacy),
+        *create_rest_routes(handler, path_prefix="/v1", enable_v0_3_compat=legacy),
     ]
 
     @asynccontextmanager
@@ -270,7 +279,12 @@ def build_zoo_app(
         server = None
         if grpc_target:
             server = grpc.aio.server()
-            a2a_pb2_grpc.add_A2AServiceServicer_to_server(GrpcHandler(handler), server)
+            if legacy:
+                a2a_v0_3_pb2_grpc.add_A2AServiceServicer_to_server(
+                    CompatGrpcHandler(handler), server
+                )
+            else:
+                a2a_pb2_grpc.add_A2AServiceServicer_to_server(GrpcHandler(handler), server)
             server.add_insecure_port(grpc_target)
             await server.start()
         try:
