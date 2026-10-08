@@ -114,3 +114,9 @@ def test_oauth_sign_in_with_wrong_secret_is_422_auth(c, oauth_zoo):
         },
     )
     assert r.status_code == 422 and r.json()["error"]["reason"] == "invalid_client"
+
+
+def test_overview_lists_required_scopes(c, oauth_zoo):
+    agent = c.post("/api/agents", json={"url": oauth_zoo.base_url}).json()
+    sec = c.get(f"/api/agents/{agent['id']}/security").json()
+    assert sec["required_scopes"]["oauth"] == ["a2a:invoke"]

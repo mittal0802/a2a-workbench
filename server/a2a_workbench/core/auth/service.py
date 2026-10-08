@@ -50,6 +50,7 @@ class SecurityOverview(BaseModel):
     status: Literal["not_required", "signed_in", "sign_in_needed"]
     schemes: list[SchemeOverview]
     requirements: list[list[str]]
+    required_scopes: dict[str, list[str]] = {}
     active: list[str]
     missing: list[str]
 
@@ -340,6 +341,10 @@ class AuthService:
             status=status,
             schemes=sorted(schemes, key=lambda s: s.name),
             requirements=[sorted(a) for a in alternatives],
+            required_scopes={
+                name: sorted({sc for a in alternatives for sc in a.get(name, [])})
+                for name in {n for a in alternatives for n in a}
+            },
             active=sorted(plan.scheme_names),
             missing=plan.missing,
         )

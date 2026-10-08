@@ -176,12 +176,25 @@ export type SchemeOverview = {
   details: Record<string, any>;
   accepts: string[];
   credential: CredentialInfo | null;
+  flows?: string[];
+  scopes?: Record<string, string>;
 };
 export type SecurityOverview = {
   status: "not_required" | "signed_in" | "sign_in_needed";
   schemes: SchemeOverview[];
   requirements: string[][];
+  required_scopes?: Record<string, string[]>;
   active: string[];
   missing: string[];
 };
 export type CredentialInput = { kind: string } & Record<string, string>;
+
+export type OAuthSignInInput = {
+  flow: "client_credentials" | "password";
+  client_id: string;
+  client_secret?: string;
+  scopes: string[];
+  auth_method: "client_secret_post" | "client_secret_basic";
+  username?: string;
+  password?: string;
+};

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
 import type { CredentialInput, SchemeOverview, SecurityOverview } from "../../lib/types";
+import { OAuthCard } from "./OAuthCard";
 
 /** Where an API key goes, in plain language. */
 function keyPlacement(details: Record<string, any>): string {
@@ -204,9 +205,19 @@ export function SecurityView({ agentId }: { agentId: string }) {
               </div>
             </div>
             <div className="cards" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
-              {s.schemes.map((scheme) => (
-                <SchemeCard key={scheme.name} agentId={agentId} scheme={scheme} needed={s.missing.includes(scheme.name)} />
-              ))}
+              {s.schemes.map((scheme) =>
+                scheme.type === "oauth2" || scheme.type === "openIdConnect" ? (
+                  <OAuthCard
+                    key={scheme.name}
+                    agentId={agentId}
+                    scheme={scheme}
+                    requiredScopes={s.required_scopes?.[scheme.name] ?? []}
+                    needed={s.missing.includes(scheme.name)}
+                  />
+                ) : (
+                  <SchemeCard key={scheme.name} agentId={agentId} scheme={scheme} needed={s.missing.includes(scheme.name)} />
+                ),
+              )}
             </div>
           </>
         )}

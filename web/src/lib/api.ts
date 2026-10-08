@@ -10,6 +10,7 @@ import type {
   A2ATask,
   CredentialInfo,
   CredentialInput,
+  OAuthSignInInput,
   SecurityOverview,
   FaultProfile,
   SendOptions,
@@ -93,6 +94,11 @@ export const api = {
   putCredential: (agentId: string, scheme: string, body: CredentialInput) =>
     call<CredentialInfo>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, {
       method: "PUT",
+      body: json(body),
+    }),
+  oauthSignIn: (agentId: string, scheme: string, body: OAuthSignInInput) =>
+    call<CredentialInfo>(`/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/sign-in`, {
+      method: "POST",
       body: json(body),
     }),
   deleteCredential: (agentId: string, scheme: string) =>
