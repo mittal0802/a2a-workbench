@@ -115,7 +115,8 @@ def test_human_output_shows_artifacts_without_last_chunk(zoo):
 
 def test_human_output_shows_artifacts_of_non_streaming_task(zoo):
     r = runner.invoke(app, ["send", zoo.base_url, "data", "--no-stream"])
-    assert 'artifact data: {"ok": true, "items": [1, 2, 3]}' in r.stdout
+    line = next(ln for ln in r.stdout.splitlines() if ln.startswith("artifact data: "))
+    assert json.loads(line.removeprefix("artifact data: ")) == {"ok": True, "items": [1, 2, 3]}
 
 
 def test_human_output_prints_streamed_artifact_once(zoo):
