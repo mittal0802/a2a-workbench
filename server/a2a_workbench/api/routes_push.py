@@ -87,12 +87,12 @@ async def delivery(delivery_id: str, wb: Workbench = Depends(get_workbench)) -> 
     return found
 
 
-def _public(wb: Workbench) -> dict[str, Any]:
+async def _public(wb: Workbench) -> dict[str, Any]:
     import shutil
 
-    source = "setting" if wb.settings.public_base_url else "tunnel" if wb.tunnel.url else "local"
+    url, source = await wb.public_url()
     return {
-        "public_base_url": wb.public_base_url(),
+        "public_base_url": url,
         "source": source,
         "tunnel_running": wb.tunnel.running,
         "cloudflared_installed": shutil.which("cloudflared") is not None,
@@ -101,27 +101,28 @@ def _public(wb: Workbench) -> dict[str, Any]:
 
 @router.get("/settings/public-url")
 async def get_public_url(wb: Workbench = Depends(get_workbench)) -> dict[str, Any]:
-    return _public(wb)
+    return await _public(wb)
 
 
 @router.put("/settings/public-url")
 async def put_public_url(
     body: PublicUrlIn, wb: Workbench = Depends(get_workbench)
 ) -> dict[str, Any]:
-    wb.settings.public_base_url = (body.public_base_url or "").strip() or None
-    return _public(wb)
+    await wb.set_public_url(body.public_base_url)
+    return await _public(wb)
 
 
 @router.post("/settings/tunnel")
 async def start_tunnel(wb: Workbench = Depends(get_workbench)) -> dict[str, Any]:
     try:
-        await wb.tunnel.start(wb.settings.port)
+        await wb.set_tunnel_url(await wb.tunnel.start(wb.settings.port))
     except TunnelUnavailableError as exc:
         raise HTTPException(422, detail={"category": "workbench", "message": str(exc)}) from None
-    return _public(wb)
+    return await _public(wb)
 
 
 @router.delete("/settings/tunnel")
 async def stop_tunnel(wb: Workbench = Depends(get_workbench)) -> dict[str, Any]:
     await wb.tunnel.stop()
-    return _public(wb)
+    await wb.set_tunnel_url(None)
+    return await _public(wb)

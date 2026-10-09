@@ -44,4 +44,4 @@ def test_serve_binds_the_settings_to_its_host_and_port(monkeypatch):
     assert CliRunner().invoke(app, ["serve", "--port", "8599"]).exit_code == 0
     wb = seen["app"].state.workbench
     assert seen["port"] == 8599 and wb.settings.port == 8599
-    assert wb.public_base_url() == "http://127.0.0.1:8599"
+    assert wb._own_url() == "http://127.0.0.1:8599"

@@ -1231,6 +1231,8 @@ def push_create(
         print_json(out)
     else:
         typer.echo(f"Created {out['config']['id']} → {out['config']['url']}")
+        if out.get("warning"):
+            typer.echo(f"warning: {out['warning']}", err=True)
 
 
 @push_app.command("list")

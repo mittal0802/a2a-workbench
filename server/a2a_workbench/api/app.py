@@ -41,6 +41,7 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await workbench.start()
+        await workbench.announce_serving()
         try:
             yield
         finally:

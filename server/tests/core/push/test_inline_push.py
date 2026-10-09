@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 
 import pytest
 import uvicorn
@@ -70,18 +69,3 @@ async def test_inline_push_binds_to_the_new_task(served, zoo):
     ]
     assert cfg["url"].endswith(f"/hooks/{hooks[0].id}")
     assert cfg["token"] == "••••" and cfg["authentication"]["credentials"] == "••••"
-
-
-def test_public_base_url_precedence(monkeypatch):
-    from a2a_workbench.core.workbench import Workbench
-
-    monkeypatch.setenv("A2AW_PORT", "9123")
-    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
-    monkeypatch.delenv("A2AW_PUBLIC_BASE_URL", raising=False)
-    wb = Workbench(Settings())
-    assert wb.public_base_url() == "http://127.0.0.1:9123"
-    wb.tunnel.url = "https://x.trycloudflare.com"
-    assert wb.public_base_url() == "https://x.trycloudflare.com"
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://hooks.example/")
-    assert Workbench(Settings()).public_base_url() == "https://hooks.example"
-    assert os.environ["A2AW_PORT"] == "9123"

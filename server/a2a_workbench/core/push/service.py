@@ -33,9 +33,10 @@ class PushService:
     call; failures raise ``AgentCallError`` with the classified error.
     """
 
-    def __init__(self, tasks: Any, hooks: Any = None) -> None:
+    def __init__(self, tasks: Any, hooks: Any = None, address: Any = None) -> None:
         self._tasks = tasks
         self._hooks = hooks
+        self._address = address
 
     async def create(
         self,
@@ -71,8 +72,10 @@ class PushService:
     async def create_workbench(self, agent_id: str, task_id: str) -> dict[str, Any]:
         """Create a config pointing at a new Workbench webhook for the task.
 
-        Returns ``{"config": <masked config>, "hook": <hook with its secrets>}``;
-        this is the only time the hook's token and credentials are returned.
+        Returns ``{"config": <masked config>, "hook": <hook with its secrets>,
+        "webhook_base", "webhook_source"}`` plus a ``warning`` when the address is
+        reachable only from this machine. This is the only time the hook's
+        token and credentials are returned.
         """
         hook = await self._hooks.create(agent_id, task_id=task_id)
         try:
@@ -88,7 +91,19 @@ class PushService:
         except Exception:
             await self._hooks.delete(hook.id)
             raise
-        return {"config": mask_config(config), "hook": hook.model_dump()}
+        return {"config": mask_config(config), "hook": hook.model_dump(), **(await self._reach())}
+
+    async def _reach(self) -> dict[str, Any]:
+        if self._address is None:
+            return {}
+        url, source = await self._address()
+        out: dict[str, Any] = {"webhook_base": url, "webhook_source": source}
+        if source == "local":
+            out["warning"] = (
+                f"{url} is only reachable from this machine; set PUBLIC_BASE_URL, save a public "
+                "URL in Settings, or start a tunnel for agents elsewhere."
+            )
+        return out
 
     async def get(self, agent_id: str, task_id: str, config_id: str) -> dict[str, Any]:
         """Return one config of the task (token and credentials masked)."""

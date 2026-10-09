@@ -2,7 +2,7 @@
 
 import hashlib
 import secrets
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -31,7 +31,7 @@ class NewHook(BaseModel):
 
 
 class HookOut(BaseModel):
-    """A hook as shown later: no secrets."""
+    """A hook as shown later: no secrets; ``url`` is the address given to the agent."""
 
     id: str
     agent_id: str
@@ -45,19 +45,16 @@ class HookOut(BaseModel):
 class HookStore:
     """Creates and looks up webhooks; secrets are stored only as hashes."""
 
-    def __init__(self, db: Database, base_url: Callable[[], str]) -> None:
+    def __init__(self, db: Database, base_url: Callable[[], Awaitable[str]]) -> None:
         self._db = db
         self._base_url = base_url
-
-    def url_for(self, hook_id: str) -> str:
-        """The URL an agent POSTs notifications to for ``hook_id``."""
-        return f"{self._base_url().rstrip('/')}/hooks/{hook_id}"
 
     async def create(
         self, agent_id: str, *, task_id: str | None = None, conversation_id: str | None = None
     ) -> NewHook:
         """Create a hook with a new token and Bearer credential (A2A §13.2: single-purpose)."""
         token, credentials = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        base = (await self._base_url()).rstrip("/")
         row = PushHook(
             agent_id=agent_id,
             task_id=task_id,
@@ -68,12 +65,14 @@ class HookStore:
         )
         async with self._db.sessions() as session:
             session.add(row)
+            await session.flush()
+            row.url = f"{base}/hooks/{row.id}"
             await session.commit()
             await session.refresh(row)
         return NewHook(
             id=row.id,
             agent_id=agent_id,
-            url=self.url_for(row.id),
+            url=row.url,
             token=token,
             auth_scheme="Bearer",
             credentials=credentials,
@@ -85,7 +84,7 @@ class HookStore:
         return HookOut(
             id=row.id,
             agent_id=row.agent_id,
-            url=self.url_for(row.id),
+            url=row.url or "",
             auth_scheme=row.auth_scheme,
             task_id=row.task_id,
             conversation_id=row.conversation_id,

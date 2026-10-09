@@ -181,6 +181,7 @@ class PushHook(Base):
     agent_id: Mapped[str] = mapped_column(String(32), index=True)
     conversation_id: Mapped[str | None] = mapped_column(String(32), default=None)
     task_id: Mapped[str | None] = mapped_column(String(200), index=True, default=None)
+    url: Mapped[str | None] = mapped_column(String(2000), default=None)
     auth_scheme: Mapped[str] = mapped_column(String(30), default="Bearer")
     credentials_hash: Mapped[str] = mapped_column(String(64))
     token_hash: Mapped[str] = mapped_column(String(64))
@@ -203,3 +204,9 @@ class PushDelivery(Base):
     headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     body: Mapped[str] = mapped_column(Text, default="")
     body_hash: Mapped[str] = mapped_column(String(64), index=True)
+
+
+class WorkbenchSetting(Base):
+    __tablename__ = "workbench_setting"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(String(2000))
