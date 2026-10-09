@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from a2a_workbench.core.assistant.keys import ProviderKeyStore
+from a2a_workbench.core.assistant.service import AssistantService
 from a2a_workbench.core.auth.service import AuthService
 from a2a_workbench.core.auth.store import CredentialStore
 from a2a_workbench.core.auth.vault import Vault, load_vault_key
@@ -36,6 +37,7 @@ class Workbench:
             self.db, self.bus, self.exchanges, self.blobs, self.auth
         )
         self.tasks = TaskService(self.agents, self.exchanges, self.auth)
+        self.assistant = AssistantService(self)
 
     async def start(self) -> None:
         """Create the state directory, the schema and the default workspace."""
@@ -47,7 +49,8 @@ class Workbench:
                 await session.commit()
 
     async def close(self) -> None:
-        """Release database connections."""
+        """Stop Assistant turns and release database connections."""
+        await self.assistant.close()
         await self.db.dispose()
 
     @classmethod

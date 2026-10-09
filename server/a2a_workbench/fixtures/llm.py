@@ -2,11 +2,13 @@
 
 Policy, applied to the latest message:
 
-- a user goal: call the first tool with ``{"message": <goal>}``;
+- a user goal: call the first tool with ``{"message": <goal>}``, or, right
+  after an ``input_required`` result, send it to that task;
 - a tool result in ``input_required``: when the goal contains "ask me", reply
   ``Question from the agent: <question>``; otherwise call the same tool on the
   same task and context with ``{"message": "B"}``;
-- ``auth_required``: reply ``Sign-in needed: <question>``;
+- ``auth_required``: reply ``Sign-in needed: <question>``, or, when the latest
+  user note says the user signed in, send the goal again on the same task;
 - an error or rejected call: reply ``Failed: <message>``;
 - anything else: reply ``Done: <first artifact text or message>``;
 - a goal containing "loop forever" calls the first tool on every turn.
@@ -25,9 +27,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from a2a_workbench.core.assistant.llm import ChatMessage, LLMReply, ToolCall, ToolSpec, Usage
+from a2a_workbench.core.assistant.prompt import RESULT_MARKER
 from a2a_workbench.fixtures.serve import ThreadServer
-
-RESULT_MARKER = "\nResult: "
 
 
 def _goal(history: list[ChatMessage]) -> str:
@@ -78,7 +79,20 @@ def scripted_reply(history: list[ChatMessage], tools: list[ToolSpec]) -> LLMRepl
     if first and "loop forever" in goal:
         return _call(first, {"message": "again"})
     if result is None:
-        return _call(first, {"message": last.text}) if first else LLMReply(text="No agents.")
+        if not first:
+            return LLMReply(text="No agents.")
+        earlier = next((r for m in reversed(history[:-1]) if (r := _result(m)) is not None), None)
+        if earlier and earlier.get("state") == "input_required" and earlier.get("task_id"):
+            name = next((m.tool_name for m in reversed(history) if m.tool_name), None) or first
+            return _call(
+                name,
+                {
+                    "message": last.text,
+                    "task_id": earlier["task_id"],
+                    "context_id": earlier.get("context_id"),
+                },
+            )
+        return _call(first, {"message": last.text})
     if result.get("rejected") or result.get("error"):
         detail = result.get("rejected") or result.get("error") or {}
         return LLMReply(text=f"Failed: {detail.get('message', detail)}", stop_reason="stop")
@@ -95,6 +109,14 @@ def scripted_reply(history: list[ChatMessage], tools: list[ToolSpec]) -> LLMRepl
             args["context_id"] = result["context_id"]
         return _call(name, args)
     if state == "auth_required":
+        if last.role == "user" and "signed in" in last.text.lower() and first:
+            name = next((m.tool_name for m in reversed(history) if m.tool_name), None) or first
+            args = {"message": goal}
+            if result.get("task_id"):
+                args["task_id"] = result["task_id"]
+            if result.get("context_id"):
+                args["context_id"] = result["context_id"]
+            return _call(name, args)
         return LLMReply(text=f"Sign-in needed: {question}", stop_reason="stop")
     return LLMReply(text=f"Done: {_first_output(result)}", stop_reason="stop")
 
