@@ -28,3 +28,10 @@ Entry format:
 - Why we need it: connecting to agents protected by any scheme the spec defines, with AND requirements, as A2A §4.5 and §7.3 describe. The Workbench applies credentials itself, through the SDK's own `ClientCallContext.service_parameters` for headers, and through the transports it already supplies (`ClientConfig.httpx_client` query parameters and TLS, `grpc_channel_factory` credentials).
 - Proposal: (1) apply every scheme of the first satisfiable requirement (OR across requirements, AND inside one); (2) add HTTP Basic (`CredentialService` returning user/password), API key in query and cookie; (3) accept an optional skill id to evaluate skill-level requirements; (4) document mTLS as transport configuration (`httpx_client` / channel credentials).
 - Status: open.
+
+## How the push config `token` is delivered is not specified
+- Where: spec (A2A v1.0, §4.3.1 / §4.3.3)
+- Missing: `TaskPushNotificationConfig.token` is "a token unique for this task or session", but the spec never says how the agent sends it with a notification. The official SDK sends it as the `X-A2A-Notification-Token` header; other implementations may differ or omit it.
+- Why we need it: a receiver cannot validate the token interoperably, so the Workbench treats a missing token as a note and only `Authorization` (which §4.3.3 does define) as a requirement.
+- Proposal: name the header (for example `A2A-Notification-Token`, matching the `A2A-Version` style) in §4.3.3 and in each binding section, and state whether receivers MUST check it.
+- Status: open.
