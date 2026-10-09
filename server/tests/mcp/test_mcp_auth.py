@@ -118,3 +118,28 @@ async def test_browser_flow_points_to_web_or_cli(oauth_zoo):
         )
     assert out["error"]["category"] == "workbench"
     assert "auth login" in out["error"]["message"]
+
+
+async def test_send_message_with_skill_applies_the_skill_requirements(oauth_zoo, idp):
+    token = idp.idp.issue(IDP_CLIENT["id"], "a2a:invoke", subject="zoo")["access_token"]
+    async with connected() as c:
+        await call(
+            c,
+            "set_credential",
+            {"agent": oauth_zoo.base_url, "scheme": "oauthCode", "access_token": token},
+        )
+        plain = await call(
+            c, "send_message", {"agent": oauth_zoo.base_url, "text": "hold AI175", "stream": False}
+        )
+        assert plain["final_state"] == "auth_required"
+        skill = await call(
+            c,
+            "send_message",
+            {
+                "agent": oauth_zoo.base_url,
+                "text": "hold AI175",
+                "stream": False,
+                "skill_id": "hold",
+            },
+        )
+        assert skill["error"]["category"] == "auth"

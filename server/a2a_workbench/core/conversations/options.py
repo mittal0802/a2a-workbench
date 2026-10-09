@@ -26,6 +26,11 @@ class SendOptions(BaseModel):
     interface_url: str | None = None
     faults: FaultProfile | None = None
     skill_id: str | None = None
+    """Skill whose card-declared security requirements choose the credentials.
+
+    Never sent: A2A messages have no skill field, and the agent decides which
+    skill handles a request.
+    """
 
 
 def build_request(message: Message, options: SendOptions) -> SendMessageRequest:

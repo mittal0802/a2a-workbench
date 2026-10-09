@@ -145,12 +145,15 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         conversation_id: str | None = None,
         faults: str | dict[str, Any] | None = None,
         timeout_s: float = 120,
+        skill_id: str | None = None,
     ) -> dict[str, Any]:
         """Send a message to an agent (URL, id or name) and wait for the reply.
 
         Pass conversation_id from a previous result to continue that
         conversation (it answers an input_required question automatically).
         faults is a preset name (see fault_presets) or a profile object.
+        skill_id applies that skill's security requirements from the card when
+        choosing credentials; it is not sent (A2A messages carry no skill).
         Waits at most timeout_s; on timeout returns the events so far with
         timed_out=true (the task keeps running; use resubscribe to follow it).
         Returns conversation_id, events, final_state, error and timed_out.
@@ -175,6 +178,7 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
             extensions=extensions or [],
             message_metadata=metadata,
             faults=profile,
+            skill_id=skill_id,
         )
         collected: list[Any] = []
         timed_out = False

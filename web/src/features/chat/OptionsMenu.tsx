@@ -75,6 +75,9 @@ export function OptionsMenu({
 }) {
   const caps = agent.card.capabilities ?? {};
   const declared: { uri: string; description?: string; required?: boolean }[] = caps.extensions ?? [];
+  const securedSkills: { id: string; name?: string }[] = (agent.card.skills ?? []).filter(
+    (s: { securityRequirements?: unknown[] }) => (s.securityRequirements ?? []).length > 0,
+  );
   const [metaText, setMetaText] = useState(value.message_metadata ? JSON.stringify(value.message_metadata) : "");
   const [metaError, setMetaError] = useState<string | null>(null);
   const set = (patch: Partial<SendOptions>) => onChange({ ...value, ...patch });
@@ -147,6 +150,32 @@ export function OptionsMenu({
           <h5>Network conditions</h5>
           <NetworkConditions value={value.faults} onChange={(faults) => set({ faults })} />
           <h5>Advanced</h5>
+          {securedSkills.length > 0 && (
+            <div style={{ padding: "4px 10px 8px" }}>
+              <label className="lbl2" style={{ fontSize: 12 }}>
+                Credentials for skill
+                <select
+                  className="jsonedit"
+                  style={{ minHeight: 0 }}
+                  value={value.skill_id ?? ""}
+                  onChange={(e) => {
+                    const { skill_id: _drop, ...rest } = value;
+                    onChange(e.target.value ? { ...rest, skill_id: e.target.value } : rest);
+                  }}
+                >
+                  <option value="">The card's requirements</option>
+                  {securedSkills.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name ?? s.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="no" style={{ fontSize: 11.5, marginTop: 4 }}>
+                Signs in with what this skill declares. Not sent to the agent: A2A messages carry no skill, and the agent picks how to handle each request.
+              </div>
+            </div>
+          )}
           <div style={{ padding: "4px 10px 8px" }}>
             <label className="lbl2" style={{ fontSize: 12 }}>
               Message metadata (JSON object)

@@ -167,3 +167,20 @@ def test_auth_probe_json(bearer_zoo):
     r = runner.invoke(app, ["auth", "probe", bearer_zoo.base_url, "--json"])
     assert r.exit_code == 0
     assert json.loads(r.stdout)[0]["check"] == "rejects_anonymous"
+
+
+def test_send_with_skill_applies_the_skill_requirements(oauth_zoo, idp):
+    token = idp.idp.issue(IDP_CLIENT["id"], "a2a:invoke", subject="zoo")["access_token"]
+    assert (
+        runner.invoke(
+            app, ["auth", "set", oauth_zoo.base_url, "oauthCode", "--access-token", token]
+        ).exit_code
+        == 0
+    )
+    plain = runner.invoke(app, ["send", oauth_zoo.base_url, "hold AI175", "--no-stream", "--json"])
+    assert plain.exit_code == 0, plain.output
+    assert '"auth_required"' in plain.stdout
+    skill = runner.invoke(
+        app, ["send", oauth_zoo.base_url, "hold AI175", "--no-stream", "--skill", "hold", "--json"]
+    )
+    assert skill.exit_code == 4, skill.output

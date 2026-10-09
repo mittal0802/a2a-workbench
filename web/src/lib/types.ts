@@ -120,6 +120,7 @@ export type SendOptions = {
   message_metadata: Record<string, unknown> | null;
   reference_task_ids: string[];
   faults: FaultProfile | null;
+  skill_id?: string;
 };
 export type FaultRule = { kind: string; mode?: string; probability?: number; params?: Record<string, unknown>; match?: Record<string, unknown> };
 export type FaultProfile = { name?: string; description?: string; rules: FaultRule[]; seed?: number };

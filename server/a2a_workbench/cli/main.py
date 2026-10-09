@@ -272,6 +272,13 @@ def send(
     context_id: Annotated[str | None, typer.Option()] = None,
     task_id: Annotated[str | None, typer.Option()] = None,
     interface: Annotated[str | None, typer.Option(help="Interface URL to use.")] = None,
+    skill: Annotated[
+        str | None,
+        typer.Option(
+            help="Apply this skill's security requirements from the card (A2A messages carry "
+            "no skill; the agent still chooses how to handle the request)."
+        ),
+    ] = None,
     faults: FaultsOpt = None,
     as_json: JsonFlag = False,
 ) -> None:
@@ -304,6 +311,7 @@ def send(
         task_id=task_id,
         interface_url=interface,
         faults=profile.profile if profile else None,
+        skill_id=skill,
     )
 
     async def go() -> ExitCode:
