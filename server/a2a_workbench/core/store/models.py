@@ -128,3 +128,13 @@ class Credential(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class ProviderKey(Base):
+    __tablename__ = "provider_key"
+    provider: Mapped[str] = mapped_column(String(30), primary_key=True)
+    encrypted: Mapped[bytes] = mapped_column(LargeBinary)
+    base_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

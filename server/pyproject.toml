@@ -19,6 +19,9 @@ dependencies = [
   "typer>=0.15",
   "httpx>=0.28.1",
   "mcp>=2.3,<3",
+  "anthropic>=1.12.1",
+  "openai>=3.26.1",
+  "google-genai>=2.29.0",
 ]
 
 [project.scripts]
