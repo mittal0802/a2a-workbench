@@ -101,12 +101,19 @@ def serve(
     import uvicorn
 
     from a2a_workbench.api.app import create_app
+    from a2a_workbench.api.logs import log_config
 
     settings = Settings()
     bind_host, bind_port = host or settings.host, port or settings.port
     if open_browser:
         webbrowser.open(f"http://{bind_host}:{bind_port}")
-    uvicorn.run(create_app(settings), host=bind_host, port=bind_port, log_level="info")
+    uvicorn.run(
+        create_app(settings),
+        host=bind_host,
+        port=bind_port,
+        log_level="info",
+        log_config=log_config(),
+    )
 
 
 @agents_app.command("add")
