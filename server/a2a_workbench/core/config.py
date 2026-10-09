@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     max_blob_bytes: int = 20 * 1024 * 1024
     max_recorded_body_bytes: int = 1024 * 1024
     allowed_hosts: str = ""
+    secret_key: str | None = None
 
     @property
     def extra_allowed_hosts(self) -> list[str]:

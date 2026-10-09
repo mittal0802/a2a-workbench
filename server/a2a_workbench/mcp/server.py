@@ -32,7 +32,10 @@ Typical flow: fetch_card(url) -> send_message(agent=url, text=...) -> read
 events and final_state -> list_exchanges(conversation_id) / get_exchange(id) to
 see exact wire traffic. Use faults="flaky_stream" (see fault_presets) to drop
 a stream, then resubscribe(conversation_id) and read the "recovered" event's
-gap analysis. Errors come back as {"error": {...}} with a category.
+gap analysis. An "auth" error means the agent needs sign-in: auth_status(agent)
+lists its schemes, then set_credential or sign_in; auth_probe checks the agent
+really enforces what it declares. Errors come back as {"error": {...}} with a
+category.
 """
 
 
@@ -142,12 +145,15 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         conversation_id: str | None = None,
         faults: str | dict[str, Any] | None = None,
         timeout_s: float = 120,
+        skill_id: str | None = None,
     ) -> dict[str, Any]:
         """Send a message to an agent (URL, id or name) and wait for the reply.
 
         Pass conversation_id from a previous result to continue that
         conversation (it answers an input_required question automatically).
         faults is a preset name (see fault_presets) or a profile object.
+        skill_id applies that skill's security requirements from the card when
+        choosing credentials; it is not sent (A2A messages carry no skill).
         Waits at most timeout_s; on timeout returns the events so far with
         timed_out=true (the task keeps running; use resubscribe to follow it).
         Returns conversation_id, events, final_state, error and timed_out.
@@ -172,6 +178,7 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
             extensions=extensions or [],
             message_metadata=metadata,
             faults=profile,
+            skill_id=skill_id,
         )
         collected: list[Any] = []
         timed_out = False
@@ -293,6 +300,153 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         """Return one exchange with headers (secrets redacted), bodies, frames, timing, fault."""
         record = await wb.exchanges.get(exchange_id)
         return record or {"error": {"category": "workbench", "message": "exchange not found"}}
+
+    async def card_of(agent: str) -> tuple[AgentOut, Any]:
+        from a2a_workbench.core.a2a_json import card_from_json
+
+        out = await resolve(agent)
+        return out, card_from_json((await wb.agents.row(out.id)).card)
+
+    @server.tool()
+    async def auth_status(agent: str) -> dict[str, Any]:
+        """Show the agent's security schemes, requirement alternatives and stored credentials.
+
+        status is no_auth, signed_in or sign_in_needed; missing lists schemes
+        still needing a credential. Credentials appear only as masked previews.
+        """
+        try:
+            out, card = await card_of(agent)
+            return (await wb.auth.overview(out.id, card)).model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def set_credential(
+        agent: str,
+        scheme: str,
+        api_key: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        token: str | None = None,
+        access_token: str | None = None,
+        cert_pem: str | None = None,
+        key_pem: str | None = None,
+        ca_pem: str | None = None,
+    ) -> dict[str, Any]:
+        """Store a credential for one of the card's security schemes; returns its masked preview.
+
+        Give api_key (apiKey), username+password (HTTP Basic), token (HTTP Bearer,
+        or an OAuth access token for OAuth/OIDC schemes), access_token, or
+        cert_pem+key_pem[+ca_pem] (mutualTLS).
+        """
+        from a2a_workbench.core.auth.service import credential_values
+
+        try:
+            out, card = await card_of(agent)
+            kind, secret = credential_values(
+                card,
+                scheme,
+                api_key=api_key,
+                username=username,
+                password=password,
+                token=token,
+                access_token=access_token,
+                cert_pem=cert_pem,
+                key_pem=key_pem,
+                ca_pem=ca_pem,
+            )
+            info = await wb.auth.set_credential(out.id, card, scheme, kind, secret)
+            return info.model_dump(mode="json")
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def sign_in(
+        agent: str,
+        scheme: str,
+        client_id: str,
+        client_secret: str | None = None,
+        scopes: list[str] | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        auth_method: str = "client_secret_post",
+    ) -> dict[str, Any]:
+        """Sign in with the OAuth flow the scheme declares.
+
+        client_credentials and password complete at once and return the masked
+        credential. device_code returns flow_id, user_code and verification_uri:
+        a person opens the URI and enters the code, then call poll_sign_in(flow_id).
+        Browser flows (authorization code, implicit, OpenID Connect) need a
+        person at a browser: use the web UI or `a2a-workbench auth login`.
+        """
+        try:
+            out, card = await card_of(agent)
+            flow = wb.auth.flow_for(card, scheme)
+            if flow in ("client_credentials", "password"):
+                info = await wb.auth.sign_in(
+                    out.id,
+                    scheme,
+                    flow=flow,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    scopes=scopes or [],
+                    auth_method=auth_method,
+                    username=username,
+                    password=password,
+                    card=card,
+                )
+                return info.model_dump(mode="json")
+            if flow == "device_code":
+                device = await wb.auth.start_device_flow(
+                    out.id,
+                    scheme,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    scopes=scopes or [],
+                    card=card,
+                )
+                return device.model_dump(mode="json")
+            return {
+                "error": {
+                    "category": "workbench",
+                    "message": f"'{scheme}' uses the {flow} flow, which needs a browser: sign in "
+                    f"from the web UI or run `a2a-workbench auth login {agent} {scheme}`",
+                }
+            }
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def poll_sign_in(flow_id: str) -> dict[str, Any]:
+        """Poll a device-code sign-in once: status is pending or signed_in (errors are returned)."""
+        try:
+            return {"status": await wb.auth.poll_device_flow(flow_id)}
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def sign_out(agent: str, scheme: str) -> dict[str, Any]:
+        """Remove the stored credential for a scheme."""
+        try:
+            out = await resolve(agent)
+            await wb.credentials.delete(out.id, scheme)
+            return {"removed": scheme}
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def auth_probe(agent: str) -> dict[str, Any]:
+        """Check the agent enforces its declared authentication.
+
+        Calls GetTask on a random id without credentials, with wrong ones and
+        with yours; each result has an outcome (pass, fail or skip) and a detail.
+        """
+        try:
+            out, card = await card_of(agent)
+            results = await wb.auth.probe(out.id, card, out.selected_interface_url)
+            return {"results": [r.model_dump() for r in results]}
+        except Exception as exc:
+            return _error(exc)
 
     @server.tool()
     async def fault_presets() -> dict[str, Any]:

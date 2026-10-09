@@ -8,6 +8,10 @@ import type {
   ExchangeSummary,
   PartInput,
   A2ATask,
+  CredentialInfo,
+  CredentialInput,
+  OAuthSignInInput,
+  SecurityOverview,
   FaultProfile,
   SendOptions,
   TaskFilter,
@@ -28,6 +32,7 @@ export class ApiError extends Error {
     public status: number,
     public category: string,
     message: string,
+    public detail: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -41,7 +46,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const err = body.error ?? { category: "workbench", message: body.detail ?? res.statusText };
     const message = typeof err.message === "string" ? err.message : JSON.stringify(body.detail ?? err);
-    throw new ApiError(res.status, err.category ?? "workbench", message);
+    throw new ApiError(res.status, err.category ?? "workbench", message, typeof err === "object" ? err : {});
   }
   return body as T;
 }
@@ -86,6 +91,35 @@ export const api = {
   listExchanges: (conversationId: string) =>
     call<ExchangeSummary[]>(`/api/exchanges?conversation_id=${encodeURIComponent(conversationId)}`),
   getExchange: (id: string) => call<ExchangeRecord>(`/api/exchanges/${id}`),
+  security: (agentId: string) => call<SecurityOverview>(`/api/agents/${agentId}/security`),
+  putCredential: (agentId: string, scheme: string, body: CredentialInput) =>
+    call<CredentialInfo>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, {
+      method: "PUT",
+      body: json(body),
+    }),
+  oauthSignIn: (agentId: string, scheme: string, body: OAuthSignInInput) =>
+    call<CredentialInfo>(`/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/sign-in`, {
+      method: "POST",
+      body: json(body),
+    }),
+  oauthStart: (agentId: string, scheme: string, body: { client_id: string; client_secret?: string; scopes: string[] }) =>
+    call<{ authorize_url: string; state: string; redirect_uri: string }>(
+      `/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/start`,
+      { method: "POST", body: json(body) },
+    ),
+  oauthDevice: (agentId: string, scheme: string, body: { client_id: string; client_secret?: string; scopes: string[] }) =>
+    call<{ flow_id: string; user_code: string; verification_uri: string; verification_uri_complete: string | null; interval: number; expires_in: number | null }>(
+      `/api/agents/${agentId}/oauth/${encodeURIComponent(scheme)}/device`,
+      { method: "POST", body: json(body) },
+    ),
+  probeSecurity: (agentId: string) =>
+    call<{ check: string; title: string; outcome: string; detail: string; spec_ref: string }[]>(
+      `/api/agents/${agentId}/security/probe`,
+      { method: "POST" },
+    ),
+  pollDevice: (flowId: string) => call<{ status: string }>(`/api/oauth/device/${flowId}`),
+  deleteCredential: (agentId: string, scheme: string) =>
+    call<void>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, { method: "DELETE" }),
   faultPresets: () => call<FaultProfile[]>("/api/fault-presets"),
   listTasks: (agentId: string, filter: TaskFilter) => call<TaskPage>(`/api/agents/${agentId}/tasks${query(filter)}`),
   getTask: (agentId: string, taskId: string, history_length?: number) =>

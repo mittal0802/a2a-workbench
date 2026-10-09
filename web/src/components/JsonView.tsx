@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { CopyButton } from "./CopyButton";
 
 function highlight(json: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -18,8 +19,8 @@ function highlight(json: string): ReactNode[] {
   return out;
 }
 
-/** Pretty-printed, syntax-highlighted JSON; strings that are not JSON are shown as-is. */
-export function JsonView({ value, raw }: { value?: unknown; raw?: string | null }) {
+/** Pretty-printed, syntax-highlighted JSON with a copy button; strings that are not JSON are shown as-is. */
+export function JsonView({ value, raw, copy = true }: { value?: unknown; raw?: string | null; copy?: boolean }) {
   let text: string;
   if (raw !== undefined) {
     try {
@@ -31,10 +32,13 @@ export function JsonView({ value, raw }: { value?: unknown; raw?: string | null 
     text = JSON.stringify(value, null, 2) ?? "undefined";
   }
   return (
-    <pre className="code">
-      {highlight(text).map((n, idx) => (
-        <Fragment key={idx}>{n}</Fragment>
-      ))}
-    </pre>
+    <div className="codewrap">
+      {copy && <CopyButton text={() => text} label="Copy JSON" className="ib copy" />}
+      <pre className="code">
+        {highlight(text).map((n, idx) => (
+          <Fragment key={idx}>{n}</Fragment>
+        ))}
+      </pre>
+    </div>
   );
 }

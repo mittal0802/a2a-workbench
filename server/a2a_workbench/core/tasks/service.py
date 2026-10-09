@@ -16,9 +16,12 @@ from a2a.types import (
 from pydantic import BaseModel, Field, field_validator
 
 from a2a_workbench.core.a2a_json import card_from_json, state_name, to_json
+from a2a_workbench.core.auth.apply import AuthPlan
+from a2a_workbench.core.auth.service import AuthService
 from a2a_workbench.core.connection.client import open_client, select_interface
 from a2a_workbench.core.connection.recorder import ExchangeSink, recording_scope
 from a2a_workbench.core.conversations.errors import classify_error
+from a2a_workbench.core.conversations.options import build_call_context
 from a2a_workbench.core.errors import AgentCallError
 from a2a_workbench.core.faults.injector import FaultInjector
 from a2a_workbench.core.faults.profile import FaultProfile
@@ -85,9 +88,12 @@ class TaskService:
     ``AgentCallError``.
     """
 
-    def __init__(self, agents: AgentService, sink: ExchangeSink) -> None:
+    def __init__(
+        self, agents: AgentService, sink: ExchangeSink, auth: AuthService | None = None
+    ) -> None:
         self._agents = agents
         self._sink = sink
+        self._auth = auth
 
     @asynccontextmanager
     async def _client(
@@ -97,21 +103,22 @@ class TaskService:
         faults: FaultProfile | FaultInjector | None,
         *,
         streaming: bool = False,
-    ) -> AsyncIterator[Client]:
+    ) -> AsyncIterator[tuple[Client, Any]]:
         agent = await self._agents.row(agent_id)
         card = card_from_json(agent.card)
+        plan = await self._auth.plan(agent_id, card) if self._auth else AuthPlan()
         with recording_scope(operation, agent_id=agent_id):
             try:
                 iface = select_interface(card, agent.selected_interface_url)
                 client = await open_client(
-                    card, iface, self._sink, streaming=streaming, faults=faults
+                    card, iface, self._sink, streaming=streaming, faults=faults, auth=plan
                 )
                 async with client:
-                    yield client
+                    yield client, build_call_context(None, plan.headers)
             except AgentCallError:
                 raise
             except Exception as exc:
-                raise AgentCallError(classify_error(exc)) from exc
+                raise AgentCallError(plan.scrub(classify_error(exc))) from exc
 
     async def get(
         self,
@@ -125,8 +132,8 @@ class TaskService:
         req = GetTaskRequest(id=task_id)
         if history_length is not None:
             req.history_length = history_length
-        async with self._client(agent_id, "get_task", faults) as client:
-            return _task_json(await client.get_task(req))
+        async with self._client(agent_id, "get_task", faults) as (client, ctx):
+            return _task_json(await client.get_task(req, context=ctx))
 
     async def list(
         self,
@@ -136,8 +143,8 @@ class TaskService:
         faults: FaultProfile | FaultInjector | None = None,
     ) -> dict[str, Any]:
         """Return ``{"tasks", "next_page_token", "page_size", "total_size"}`` for ``f``."""
-        async with self._client(agent_id, "list_tasks", faults) as client:
-            resp = await client.list_tasks(_list_request(f))
+        async with self._client(agent_id, "list_tasks", faults) as (client, ctx):
+            resp = await client.list_tasks(_list_request(f), context=ctx)
         return {
             "tasks": [_task_json(t) for t in resp.tasks],
             "next_page_token": resp.next_page_token or None,
@@ -157,15 +164,18 @@ class TaskService:
         req = CancelTaskRequest(id=task_id)
         if metadata:
             req.metadata.update(metadata)
-        async with self._client(agent_id, "cancel_task", faults) as client:
-            return _task_json(await client.cancel_task(req))
+        async with self._client(agent_id, "cancel_task", faults) as (client, ctx):
+            return _task_json(await client.cancel_task(req, context=ctx))
 
     async def subscribe(
         self, agent_id: str, task_id: str, *, faults: FaultProfile | FaultInjector | None = None
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield ``{"kind", "state", "event"}`` for each event of the resubscribed stream."""
-        async with self._client(agent_id, "subscribe_task", faults, streaming=True) as client:
-            async for resp in client.subscribe(SubscribeToTaskRequest(id=task_id)):
+        async with self._client(agent_id, "subscribe_task", faults, streaming=True) as (
+            client,
+            ctx,
+        ):
+            async for resp in client.subscribe(SubscribeToTaskRequest(id=task_id), context=ctx):
                 payload = resp.WhichOneof("payload")
                 message = getattr(resp, payload)
                 state = None

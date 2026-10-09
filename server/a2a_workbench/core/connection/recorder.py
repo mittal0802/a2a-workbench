@@ -63,12 +63,17 @@ ExchangeSink = Callable[[Exchange], Awaitable[None]]
 
 @dataclass
 class RecordingScope:
-    """Labels attached to exchanges recorded while the scope is active."""
+    """Labels attached to exchanges recorded while the scope is active.
+
+    ``redact_fields`` names form or JSON body fields whose values are masked
+    in the recorded request and response bodies.
+    """
 
     operation: str
     agent_id: str | None = None
     conversation_id: str | None = None
     exchange_ids: list[str] = field(default_factory=list)
+    redact_fields: frozenset[str] = frozenset()
 
 
 _current_scope: ContextVar[RecordingScope | None] = ContextVar("a2aw_recording_scope", default=None)
@@ -76,10 +81,14 @@ _current_scope: ContextVar[RecordingScope | None] = ContextVar("a2aw_recording_s
 
 @contextmanager
 def recording_scope(
-    operation: str, *, agent_id: str | None = None, conversation_id: str | None = None
+    operation: str,
+    *,
+    agent_id: str | None = None,
+    conversation_id: str | None = None,
+    redact_fields: frozenset[str] = frozenset(),
 ) -> Iterator[RecordingScope]:
     """Label exchanges recorded in this context and collect their ids."""
-    scope = RecordingScope(operation, agent_id, conversation_id)
+    scope = RecordingScope(operation, agent_id, conversation_id, redact_fields=redact_fields)
     token = _current_scope.set(scope)
     try:
         yield scope
@@ -108,8 +117,11 @@ SENSITIVE_QUERY_KEYS = frozenset(
 )
 
 
-def redact_url(url: str) -> str:
-    """Return ``url`` with user info and credential-like query values masked."""
+def redact_url(url: str, extra_keys: frozenset[str] = frozenset()) -> str:
+    """Return ``url`` with user info and credential-like query values masked.
+
+    ``extra_keys`` names further query parameters to mask.
+    """
     parts = urlsplit(url)
     netloc = parts.netloc
     if "@" in netloc:
@@ -118,10 +130,31 @@ def redact_url(url: str) -> str:
     if query:
         pairs = parse_qsl(query, keep_blank_values=True)
         query = urlencode(
-            [(k, REDACTED if k.lower() in SENSITIVE_QUERY_KEYS else v) for k, v in pairs],
+            [
+                (k, REDACTED if k.lower() in SENSITIVE_QUERY_KEYS or k in extra_keys else v)
+                for k, v in pairs
+            ],
             safe=REDACTED,
         )
     return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+
+
+def redact_body(body: str | None, fields: frozenset[str]) -> str | None:
+    """Return ``body`` with the values of ``fields`` masked in form-encoded or JSON content."""
+    if not body or not fields:
+        return body
+    import json
+
+    try:
+        value = json.loads(body)
+    except ValueError:
+        value = None
+    if isinstance(value, dict):
+        return json.dumps({k: (REDACTED if k in fields else v) for k, v in value.items()})
+    if "=" in body and "\n" not in body:
+        pairs = parse_qsl(body, keep_blank_values=True)
+        return urlencode([(k, REDACTED if k in fields else v) for k, v in pairs], safe=REDACTED)
+    return body
 
 
 def current_operation() -> str | None:
@@ -130,10 +163,14 @@ def current_operation() -> str | None:
     return scope.operation if scope else None
 
 
-def redact_headers(headers: httpx.Headers) -> dict[str, str]:
-    """Return headers as a lowercase dict with credential-bearing values masked."""
+def redact_headers(headers: httpx.Headers, extra: frozenset[str] = frozenset()) -> dict[str, str]:
+    """Return headers as a lowercase dict with credential-bearing values masked.
+
+    ``extra`` holds further lowercase header names to mask, such as API-key
+    headers named by an agent card.
+    """
     return {
-        k.lower(): (REDACTED if k.lower() in SENSITIVE_HEADERS else v)
+        k.lower(): (REDACTED if k.lower() in SENSITIVE_HEADERS or k.lower() in extra else v)
         for k, v in headers.multi_items()
     }
 
@@ -160,7 +197,9 @@ class _RecordingStream(httpx.AsyncByteStream):
         is_sse: bool,
         max_body_bytes: int,
         content_encoding: str,
+        redact: frozenset[str] = frozenset(),
     ) -> None:
+        self._redact = redact
         self._inner = inner
         self._ex = exchange
         self._started = started
@@ -234,6 +273,7 @@ class _RecordingStream(httpx.AsyncByteStream):
             self._ex.response_body = "(compressed body not decoded)"
         elif not self._is_sse:
             self._ex.response_body = self._body.decode("utf-8", errors="replace")
+        self._ex.response_body = redact_body(self._ex.response_body, self._redact)
         self._ex.duration_ms = self._elapsed()
         self._ex.complete = True
         await self._sink(self._ex)
@@ -254,10 +294,14 @@ class RecordingTransport(httpx.AsyncBaseTransport):
         inner: httpx.AsyncBaseTransport | None = None,
         *,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+        sensitive_query: frozenset[str] = frozenset(),
+        sensitive_headers: frozenset[str] = frozenset(),
     ) -> None:
         self._sink = sink
         self._inner = inner or httpx.AsyncHTTPTransport()
         self._max = max_body_bytes
+        self._sensitive_query = sensitive_query
+        self._sensitive_headers = frozenset(h.lower() for h in sensitive_headers)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         """Forward ``request`` to the inner transport and record the exchange."""
@@ -266,10 +310,12 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             id=uuid.uuid4().hex,
             operation=scope.operation if scope else "http",
             http_method=request.method,
-            url=redact_url(str(request.url)),
+            url=redact_url(str(request.url), self._sensitive_query),
             started_at=datetime.now(UTC),
-            request_headers=redact_headers(request.headers),
-            request_body=self._request_body(request),
+            request_headers=redact_headers(request.headers, self._sensitive_headers),
+            request_body=redact_body(
+                self._request_body(request), scope.redact_fields if scope else frozenset()
+            ),
             agent_id=scope.agent_id if scope else None,
             conversation_id=scope.conversation_id if scope else None,
         )
@@ -286,7 +332,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             raise
         exchange.fault = request.extensions.get("a2aw_fault")
         exchange.status = response.status_code
-        exchange.response_headers = redact_headers(response.headers)
+        exchange.response_headers = redact_headers(response.headers, self._sensitive_headers)
         exchange.complete = False
         await self._sink(exchange)
         stream = _RecordingStream(
@@ -297,6 +343,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             is_sse=response.headers.get("content-type", "").startswith("text/event-stream"),
             max_body_bytes=self._max,
             content_encoding=response.headers.get("content-encoding", ""),
+            redact=scope.redact_fields if scope else frozenset(),
         )
         return httpx.Response(
             status_code=response.status_code,

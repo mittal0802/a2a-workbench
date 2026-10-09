@@ -109,7 +109,7 @@ export type ExchangeRecord = ExchangeSummary & {
 };
 export type PartInput =
   | { kind: "text"; text: string }
-  | { kind: "file"; blob_id?: string; url?: string; media_type?: string; filename?: string }
+  | { kind: "file"; blob_id?: string; url?: string; raw_base64?: string; media_type?: string; filename?: string }
   | { kind: "data"; data: unknown };
 export type SendOptions = {
   stream: boolean;
@@ -120,6 +120,7 @@ export type SendOptions = {
   message_metadata: Record<string, unknown> | null;
   reference_task_ids: string[];
   faults: FaultProfile | null;
+  skill_id?: string;
 };
 export type FaultRule = { kind: string; mode?: string; probability?: number; params?: Record<string, unknown>; match?: Record<string, unknown> };
 export type FaultProfile = { name?: string; description?: string; rules: FaultRule[]; seed?: number };
@@ -165,4 +166,37 @@ export type RecoveryData = {
   missed_artifacts: string[];
   duplicate_events: number;
   terminal: boolean;
+};
+
+export type CredentialInfo = { scheme_name: string; kind: string; preview: string; readable: boolean; expires_at: string | null; updated_at: string; renewal_error?: string | null };
+export type SchemeOverview = {
+  name: string;
+  type: "apiKey" | "http" | "oauth2" | "openIdConnect" | "mutualTLS" | "unknown";
+  label: string;
+  description: string;
+  details: Record<string, any>;
+  accepts: string[];
+  credential: CredentialInfo | null;
+  flows?: string[];
+  scopes?: Record<string, string>;
+};
+export type SecurityOverview = {
+  status: "not_required" | "signed_in" | "sign_in_needed";
+  schemes: SchemeOverview[];
+  requirements: string[][];
+  required_scopes?: Record<string, string[]>;
+  active: string[];
+  missing: string[];
+  expired?: string[];
+};
+export type CredentialInput = { kind: string } & Record<string, string>;
+
+export type OAuthSignInInput = {
+  flow: "client_credentials" | "password";
+  client_id: string;
+  client_secret?: string;
+  scopes: string[];
+  auth_method: "client_secret_post" | "client_secret_basic";
+  username?: string;
+  password?: string;
 };

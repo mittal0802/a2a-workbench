@@ -5,6 +5,7 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
+from typing import Any
 
 from a2a.types import (
     CancelTaskRequest,
@@ -23,6 +24,8 @@ from a2a_workbench.core.a2a_json import (
     card_from_json,
     to_json,
 )
+from a2a_workbench.core.auth.apply import AuthPlan
+from a2a_workbench.core.auth.service import AuthService
 from a2a_workbench.core.blobs import BlobService
 from a2a_workbench.core.bus import EventBus
 from a2a_workbench.core.connection.client import open_client, select_interface
@@ -113,7 +116,15 @@ class ConversationService:
     stay gap-free and unique per conversation.
     """
 
-    def __init__(self, db: Database, bus: EventBus, sink: ExchangeSink, blobs: BlobService) -> None:
+    def __init__(
+        self,
+        db: Database,
+        bus: EventBus,
+        sink: ExchangeSink,
+        blobs: BlobService,
+        auth: AuthService | None = None,
+    ) -> None:
+        self._auth = auth
         self._db = db
         self._bus = bus
         self._sink = sink
@@ -273,14 +284,16 @@ class ConversationService:
         *,
         task_id: str | None = None,
         exchange_id: str | None = None,
+        plan: AuthPlan | None = None,
     ) -> TimelineEvent:
+        classified = classify_error(exc)
         return await self._emit(
             TimelineEvent(
                 conversation_id=conversation_id,
                 kind="error",
                 task_id=task_id,
                 exchange_id=exchange_id,
-                data=classify_error(exc),
+                data=plan.scrub(classified) if plan else classified,
             )
         )
 
@@ -291,8 +304,11 @@ class ConversationService:
         task_id: str | None,
         last_state: str | None,
         exchange_id: str | None,
+        plan: AuthPlan | None = None,
     ) -> TimelineEvent:
         classified = classify_error(exc)
+        if plan is not None:
+            classified = plan.scrub(classified)
         open_task = last_state not in TERMINAL_STATES | INTERRUPTED_STATES
         if classified["category"] == "transport" and task_id and last_state and open_task:
             return await self._emit(
@@ -384,7 +400,9 @@ class ConversationService:
         with recording_scope(
             "subscribe_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            plan = AuthPlan()
             try:
+                plan = await self._plan(agent.id, card)
                 iface = select_interface(card, agent.selected_interface_url)
                 client = await open_client(
                     card,
@@ -392,9 +410,13 @@ class ConversationService:
                     self._sink,
                     streaming=True,
                     faults=self._injectors.get(conversation_id, faults),
+                    auth=plan,
                 )
                 async with client:
-                    async for resp in client.subscribe(SubscribeToTaskRequest(id=task_id)):
+                    async for resp in client.subscribe(
+                        SubscribeToTaskRequest(id=task_id),
+                        context=build_call_context(None, plan.headers),
+                    ):
                         event = await self._emit(
                             event_from_stream_response(
                                 resp,
@@ -408,7 +430,7 @@ class ConversationService:
                         yield event
             except Exception as exc:
                 yield await self._failure(
-                    conversation_id, exc, task_id, state, _last_exchange(scope)
+                    conversation_id, exc, task_id, state, _last_exchange(scope), plan=plan
                 )
                 return
             finally:
@@ -446,7 +468,9 @@ class ConversationService:
         with recording_scope(
             "get_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            plan = AuthPlan()
             try:
+                plan = await self._plan(agent.id, card)
                 iface = select_interface(card, agent.selected_interface_url)
                 client = await open_client(
                     card,
@@ -454,12 +478,15 @@ class ConversationService:
                     self._sink,
                     streaming=False,
                     faults=self._injectors.get(conversation_id, faults),
+                    auth=plan,
                 )
                 async with client:
-                    task = await client.get_task(GetTaskRequest(id=task_id))
+                    task = await client.get_task(
+                        GetTaskRequest(id=task_id), context=build_call_context(None, plan.headers)
+                    )
             except Exception as exc:
                 yield await self._failure(
-                    conversation_id, exc, task_id, conv.task_state, _last_exchange(scope)
+                    conversation_id, exc, task_id, conv.task_state, _last_exchange(scope), plan=plan
                 )
                 return
         event = await self._emit(
@@ -480,6 +507,11 @@ class ConversationService:
                 data=analyze_recovery(before, [event], "get_task"),
             )
         )
+
+    async def _plan(self, agent_id: str, card: Any, skill_id: str | None = None) -> AuthPlan:
+        if self._auth is None:
+            return AuthPlan()
+        return await self._auth.plan(agent_id, card, skill_id=skill_id)
 
     async def _load(self, conversation_id: str) -> tuple[Conversation, Agent]:
         async with self._db.sessions() as session:
@@ -537,7 +569,9 @@ class ConversationService:
         ) as scope:
             seen_task, seen_state, received = task_id, None, 0
             self._open_streams[conversation_id] += 1
+            plan = AuthPlan()
             try:
+                plan = await self._plan(agent.id, card, options.skill_id)
                 iface = select_interface(
                     card, options.interface_url or agent.selected_interface_url
                 )
@@ -547,10 +581,12 @@ class ConversationService:
                     self._sink,
                     streaming=options.stream,
                     faults=self._injectors.get(conversation_id, options.faults),
+                    auth=plan,
                 )
                 async with client:
                     stream = client.send_message(
-                        build_request(message, options), context=build_call_context(options)
+                        build_request(message, options),
+                        context=build_call_context(options, plan.headers),
                     )
                     async for resp in stream:
                         event = await self._emit(
@@ -567,7 +603,7 @@ class ConversationService:
                         yield event
             except Exception as exc:
                 yield await self._failure(
-                    conversation_id, exc, seen_task, seen_state, _last_exchange(scope)
+                    conversation_id, exc, seen_task, seen_state, _last_exchange(scope), plan=plan
                 )
                 return
             finally:
@@ -614,11 +650,16 @@ class ConversationService:
         with recording_scope(
             "cancel_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            plan = AuthPlan()
             try:
+                plan = await self._plan(agent.id, card)
                 iface = select_interface(card, agent.selected_interface_url)
-                client = await open_client(card, iface, self._sink, streaming=False)
+                client = await open_client(card, iface, self._sink, streaming=False, auth=plan)
                 async with client:
-                    task = await client.cancel_task(CancelTaskRequest(id=conv.task_id))
+                    task = await client.cancel_task(
+                        CancelTaskRequest(id=conv.task_id),
+                        context=build_call_context(None, plan.headers),
+                    )
                 yield await self._emit(
                     event_from_stream_response(
                         StreamResponse(task=task),
@@ -633,4 +674,5 @@ class ConversationService:
                     exc,
                     task_id=conv.task_id,
                     exchange_id=_last_exchange(scope),
+                    plan=plan,
                 )

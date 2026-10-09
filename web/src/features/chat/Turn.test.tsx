@@ -67,3 +67,25 @@ describe("AgentBubble recovery", () => {
     expect(screen.getByText(/back in sync/i)).toBeInTheDocument();
   });
 });
+
+describe("AgentBubble sign-in prompts", () => {
+  it("offers sign in and retry on an auth error", async () => {
+    const onSignIn = vi.fn();
+    const onRetry = vi.fn();
+    const turn = agentTurn([ev(1, "error", { category: "auth", message: "HTTP Error 401", http_status: 401 })]);
+    render(<AgentBubble turn={turn} agentName="Zoo" onSignIn={onSignIn} onRetry={onRetry} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(/needs you to sign in/i);
+    await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }));
+    expect(onSignIn).toHaveBeenCalled();
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it("offers sign in and continue when the task needs sign-in", async () => {
+    const onContinue = vi.fn();
+    const turn = agentTurn([ev(1, "status", { state: "auth_required", status: { message: { parts: [{ text: "Please sign in." }] } } })]);
+    render(<AgentBubble turn={turn} agentName="Zoo" onSignIn={() => {}} onContinue={onContinue} />);
+    await userEvent.click(screen.getByRole("button", { name: /continue/i }));
+    expect(onContinue).toHaveBeenCalled();
+  });
+});

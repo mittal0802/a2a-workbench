@@ -21,6 +21,10 @@ Tools (all return JSON; failures come back as `{"error": {...}}`):
 | `resubscribe(conversation_id)`, `check_status(conversation_id)` | Recover after a lost connection; the last event is `recovered` with a gap analysis |
 | `list_exchanges(conversation_id)`, `get_exchange(exchange_id)` | Exact wire traffic (secrets redacted) |
 | `list_agents`, `add_agent`, `fault_presets` | Registry and fault presets |
+| `auth_status(agent)` | Security schemes, requirement alternatives, which credentials are stored (masked) |
+| `set_credential(agent, scheme, api_key? / username+password? / token? / access_token? / cert_pem+key_pem?)` | Store a credential |
+| `sign_in(agent, scheme, client_id, client_secret?, scopes?)` | OAuth client credentials or password; for device code it returns `user_code` + `verification_uri`, then `poll_sign_in(flow_id)` |
+| `sign_out(agent, scheme)`, `auth_probe(agent)` | Remove a credential; check the agent enforces its declared auth |
 
 ## Use it from a shell
 
@@ -32,7 +36,16 @@ a2a-workbench tasks list "My agent" --status working --all --json
 a2a-workbench tasks subscribe "My agent" <task-id> --json
 a2a-workbench send "My agent" "long job" --faults flaky_stream --json
 a2a-workbench faults presets --json
+a2a-workbench auth status "My agent" --json
+A2AW_TOKEN="$TOKEN" a2a-workbench auth set "My agent" bearer
+A2AW_CLIENT_SECRET="$SECRET" a2a-workbench auth login "My agent" oauth --client-id "$ID" --scope read --json
+a2a-workbench auth login "My agent" oauthDevice --client-id "$ID"   # prints a code to enter
+a2a-workbench auth probe "My agent" --json
 ```
+
+Browser sign-in flows (authorization code, implicit, OpenID Connect) need a
+person: ask the user to sign in from the web UI or with `a2a-workbench auth
+login`, or to give you an access token for `set_credential`.
 
 Exit codes: `0` ok · `1` checks failed · `2` usage error · `3` connection error
 · `4` auth error · `5` protocol error (an A2A or HTTP error from the agent) ·
@@ -69,5 +82,8 @@ States are lowercase A2A task states: `submitted`, `working`, `input_required`,
    `resubscribe(conversation_id)`. A compliant agent returns the current Task
    first (`snapshot_first: true`), sends nothing twice (`duplicate_events: 0`)
    and finishes (`terminal: true`).
-6. Try every binding the card lists (switch with the web UI connection menu,
+6. Authentication: if a call fails with category `auth`, read `auth_status`,
+   sign in, retry; then `auth_probe` to confirm the agent rejects anonymous
+   and wrong credentials.
+7. Try every binding the card lists (switch with the web UI connection menu,
    or `send --interface <url>`).

@@ -21,3 +21,10 @@ Entry format:
 - Why we need it: one process that serves a v0.3 gRPC agent (the zoo) and acts as a client.
 - Proposal: break the cycle (import the compat transport lazily inside the gRPC producer) and stop treating a circular-import `ImportError` as "grpc extras not installed".
 - Status: open. Workaround: `a2a_workbench/fixtures/zoo.py` imports `a2a.client` first.
+
+## `AuthInterceptor` covers only some security schemes and one scheme per requirement
+- Where: SDK (`a2a-python` 1.2.2, `a2a/client/auth/interceptor.py`)
+- Missing: the interceptor walks `security_requirements` and returns after applying the **first** scheme it has a credential for, so an AND requirement (`{"apiKey": [], "oauth2": ["read"]}`) sends only one of the two. It handles HTTP Bearer, OAuth 2.0 / OIDC (as Bearer) and API keys in a header; HTTP Basic is not handled, and API keys in a query parameter or cookie are skipped (the source says so). Skill-level `security_requirements` are not considered, and mutual TLS has no client-side hook.
+- Why we need it: connecting to agents protected by any scheme the spec defines, with AND requirements, as A2A §4.5 and §7.3 describe. The Workbench applies credentials itself, through the SDK's own `ClientCallContext.service_parameters` for headers, and through the transports it already supplies (`ClientConfig.httpx_client` query parameters and TLS, `grpc_channel_factory` credentials).
+- Proposal: (1) apply every scheme of the first satisfiable requirement (OR across requirements, AND inside one); (2) add HTTP Basic (`CredentialService` returning user/password), API key in query and cookie; (3) accept an optional skill id to evaluate skill-level requirements; (4) document mTLS as transport configuration (`httpx_client` / channel credentials).
+- Status: open.

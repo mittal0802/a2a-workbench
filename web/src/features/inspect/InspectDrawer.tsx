@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { CopyButton, downloadText } from "../../components/CopyButton";
 import { JsonView } from "../../components/JsonView";
 import { api } from "../../lib/api";
 import type { ExchangeRecord, ExchangeSummary } from "../../lib/types";
@@ -38,6 +39,55 @@ export function curlFor(ex: ExchangeRecord): string {
   if (ex.request_body) parts.push(`--data ${quote(ex.request_body)}`);
   return parts.join(" \\\n  ");
 }
+
+function parsed(text: string | null): unknown {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+export type ExchangeExport = {
+  id: string;
+  operation: string;
+  started_at: string;
+  duration_ms: number | null;
+  error: string | null;
+  fault?: string;
+  request: { method: string; url: string; headers: Record<string, string>; body: unknown };
+  response: {
+    status: number | null;
+    headers: Record<string, string>;
+    body?: unknown;
+    events?: { t_ms: number; data: unknown }[];
+    truncated?: boolean;
+  };
+};
+
+/** A recorded exchange as a portable JSON document: JSON bodies parsed, stream events listed in order. */
+export function exchangeExport(ex: ExchangeRecord): ExchangeExport {
+  return {
+    id: ex.id,
+    operation: ex.operation,
+    started_at: ex.started_at,
+    duration_ms: ex.duration_ms,
+    error: ex.error,
+    ...(ex.fault ? { fault: ex.fault } : {}),
+    request: { method: ex.http_method, url: ex.url, headers: ex.request_headers, body: parsed(ex.request_body) },
+    response: {
+      status: ex.status,
+      headers: ex.response_headers,
+      ...(ex.frames.length > 0
+        ? { events: ex.frames.map((f) => ({ t_ms: f.t_ms, data: parsed(frameData(f.data) || f.data) })) }
+        : { body: parsed(ex.response_body) }),
+      ...(ex.truncated ? { truncated: true } : {}),
+    },
+  };
+}
+
+const pretty = (v: unknown) => JSON.stringify(v, null, 2);
 
 function frameData(frame: string): string {
   return frame
@@ -96,9 +146,11 @@ function Detail({ id }: { id: string }) {
           ))}
         </div>
         <div className="spacer" />
-        <button className="ib" onClick={() => navigator.clipboard?.writeText(curlFor(r))}>
-          Copy as cURL
+        <CopyButton text={() => pretty(exchangeExport(r))} label="Copy exchange" />
+        <button className="ib" onClick={() => downloadText(`exchange-${r.id}.json`, pretty(exchangeExport(r)))}>
+          Download
         </button>
+        <CopyButton text={() => curlFor(r)} label="Copy as cURL" />
       </div>
       <div className="mono" style={{ marginBottom: 8, wordBreak: "break-all" }}>
         {r.http_method} {r.url} → {r.status ?? "no response"} ·{" "}
@@ -153,6 +205,7 @@ export function InspectDrawer({
 }) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<string | null>(focusExchangeId ?? null);
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     if (focusExchangeId) setSelected(focusExchangeId);
   }, [focusExchangeId]);
@@ -184,6 +237,28 @@ export function InspectDrawer({
             {list.data?.length ?? 0} requests
           </span>
           <div className="spacer" />
+          {conversationId && (list.data?.length ?? 0) > 0 && (
+            <button
+              className="ib"
+              disabled={exporting}
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  const records = await Promise.all(list.data!.map((e) => api.getExchange(e.id)));
+                  const doc = {
+                    conversation_id: conversationId,
+                    exported_at: new Date().toISOString(),
+                    exchanges: records.map(exchangeExport),
+                  };
+                  downloadText(`conversation-${conversationId}-exchanges.json`, pretty(doc));
+                } finally {
+                  setExporting(false);
+                }
+              }}
+            >
+              {exporting ? "Exporting…" : "Export all"}
+            </button>
+          )}
           <button className="ib" onClick={onClose} aria-label="Close inspect">
             ✕
           </button>

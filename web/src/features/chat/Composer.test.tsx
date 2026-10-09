@@ -69,6 +69,35 @@ describe("Composer", () => {
     });
   });
 
+  it("applies a skill's sign-in requirements only when the card declares some", async () => {
+    const onSend = vi.fn();
+    const agent = {
+      card: {
+        capabilities: { streaming: true },
+        skills: [
+          { id: "echo", name: "Echo" },
+          { id: "hold", name: "Hold a booking", securityRequirements: [{ schemes: { oauth: { list: ["booking.write"] } } }] },
+        ],
+      },
+    } as never;
+    render(<Composer agent={agent} onSend={onSend} onStop={() => {}} replying={false} busy={false} />);
+    await userEvent.click(screen.getByRole("button", { name: /options/i }));
+    const picker = screen.getByLabelText(/credentials for skill/i);
+    expect(screen.getByRole("option", { name: /hold a booking/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^echo$/i })).toBeNull();
+    expect(screen.getByText(/not sent to the agent/i)).toBeInTheDocument();
+    await userEvent.selectOptions(picker, "hold");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.type(screen.getByPlaceholderText(/message/i), "hold AI175{Enter}");
+    expect(onSend.mock.calls[0][1]).toMatchObject({ skill_id: "hold" });
+  });
+
+  it("hides the skill picker when no skill declares requirements", async () => {
+    render(<Composer agent={streamingAgent} onSend={() => {}} onStop={() => {}} replying={false} busy={false} />);
+    await userEvent.click(screen.getByRole("button", { name: /options/i }));
+    expect(screen.queryByLabelText(/credentials for skill/i)).toBeNull();
+  });
+
   it("shows the reply pill and stop button", () => {
     const onStop = vi.fn();
     render(<Composer agent={streamingAgent} onSend={() => {}} onStop={onStop} replying busy />);

@@ -249,21 +249,113 @@ a2a-workbench/
   destructive probes (cancel, delete push config) only touch tasks the suite
   created itself.
 
-### 5.6 `assistant/` — orchestrator
+### 5.6 `assistant/` — agent-calling mode
 
-- `LLMAdapter` interface: `stream(messages, tools) -> AsyncIterator[Delta]`.
-  Implementations: Anthropic (first), OpenAI (also covers OpenAI-compatible
-  `base_url`: Ollama, vLLM, LM Studio), Gemini. Users bring their own keys,
-  stored in the vault.
-- **Tool builder:** each enabled agent becomes a tool `call_<agent>` (input:
-  message text, optional data/file refs, optional `task_id` to continue).
-  Descriptions are generated from the card and skills. Helper tools:
-  `get_task`, `cancel_task`.
-- **Run loop:** plan, then tool calls, then results back to the LLM. When an
-  agent returns `input_required`, the question goes back to the LLM, which can
-  answer it or ask the user. Limits: max steps (default 12), timeouts and token
-  budget. Each A2A call is a normal conversation, so "Open this conversation"
-  shows it in Chat with full Inspect.
+The Assistant is an orchestrator LLM acting as an A2A **client agent**: it
+calls registered agents the way the A2A specification defines a client
+agent should. Every rule below cites the spec section it follows; behaviour
+the spec leaves to the client (how results are presented to the user) is a
+user setting, not a protocol feature.
+
+- **LLM adapters.** `LLMAdapter.stream(messages, tools) -> AsyncIterator[Delta]`.
+  Anthropic, OpenAI (also any OpenAI-compatible `base_url`: Ollama, vLLM,
+  LM Studio) and Gemini. Keys are the user's own, stored in the vault.
+- **Discovery and connection.** The orchestrator knows an agent only through
+  its Agent Card (§8.1; Opaque Execution, §1.2). Interface selection follows
+  §8.3.2 (first supported `supportedInterfaces` entry, its URL and exact
+  `tenant`); the SDK sends `A2A-Version` (§3.6.1). Credentials come from the
+  card's `securitySchemes`/`securityRequirements` and are sent on every
+  request (§7.3). Optional features are used only when `capabilities`
+  declares them (§3.3.4).
+- **Tool per agent.** Name derived from the card `name`. The description is
+  built only from card fields: `description`, `defaultInputModes`,
+  `defaultOutputModes`, and for each skill `id`, `name`, `description`,
+  `tags`, `examples`, `inputModes`, `outputModes`. Inputs map one-to-one to
+  `Message` / `SendMessageConfiguration` fields:
+  - `parts` (text, data, file), checked against the declared input modes;
+  - `context_id`, accepted only if the agent returned it earlier
+    (clients SHOULD NOT generate one, §3.4.1);
+  - `task_id`, accepted only for a non-terminal task (§3.4.2, §3.4.3); a
+    terminal task is immutable, so the tool tells the LLM to send a follow-up
+    in the same `context_id` with `reference_task_ids` instead
+    ("Life of a Task": Task Refinements, Task Immutability);
+  - `reference_task_ids` (§3.4.3 SHOULD for follow-ups);
+  - `accepted_output_modes`, the media types the orchestrator can use.
+  There is no skill selector: `Message` has no skill field, so the agent
+  chooses the skill. Skills inform which agent to call and how to phrase the
+  request.
+  Helper tools: `get_task`, `cancel_task`.
+- **Delivery (§3.2.2, §3.5).** `SendStreamingMessage` when
+  `capabilities.streaming`, otherwise blocking `SendMessage`. Long tasks may
+  use `return_immediately` followed by `SubscribeToTask`, `GetTask` polling or
+  push notifications (when declared). A dropped stream is recovered with
+  `SubscribeToTask` (§3.5.2).
+- **Results (§3.7).** A `Message` reply yields its parts and `context_id`. A
+  `Task` reply yields state, status message and **artifacts as the result**;
+  status messages are communication, not reliable delivery. An agent that
+  returns its output only in messages gets a §3.7 SHOULD warning.
+- **Multi-turn.** `input_required`: continue with the same `task_id` and
+  `context_id` (§3.4.3). Terminal states (`completed`, `failed`,
+  `canceled`, `rejected`): follow-ups are new tasks in the same context with
+  `reference_task_ids`. Several tasks may run in parallel in one context
+  ("Parallel Follow-ups").
+- **`auth_required` (§7.6.2).** The Workbench delegates to the human: the run
+  pauses showing the agent's status message, with Sign in and Reply actions.
+  While paused it keeps the task observed (Subscribe, or Get Task polling),
+  because the agent may continue without a follow-up message.
+- **Extensions.** Only extensions the user enabled are sent; an agent's
+  `ExtensionSupportRequiredError` is shown as returned.
+- **Response mode (user setting).** A2A does not define how a client agent
+  presents results to its user, so this is the user's choice, per run (CLI
+  `--response-mode`, MCP `response_mode`), with a per-agent default:
+  - **Rewrite** — agent output goes to the LLM as the tool result; the user
+    sees the Assistant's answer. The agent's verbatim output stays visible in
+    the step timeline.
+  - **Pass-through** — the agent's output is streamed straight to the user as
+    that agent's turn, attributed to it: status messages, artifacts as they
+    arrive (files downloadable as delivered, data shown as JSON), and
+    `input_required` questions in the agent's own words (the user's reply goes
+    to the agent on the same task). The same content is appended to the LLM's
+    context, marked as already shown to the user, so the LLM keeps full
+    context, does not repeat it, and continues orchestrating (further calls or
+    a short follow-up).
+  In both modes every answer to an `input_required` question is attributed
+  (user or Assistant) in the timeline.
+- **Run loop and limits.** Plan, tool calls, results back to the LLM, until
+  the LLM finishes, the run pauses for the user, or a limit is hit (max steps,
+  default 12; per-call and run timeouts; token budget).
+- **Visibility.** Every A2A call is an ordinary conversation
+  (`origin = assistant`) with full Inspect, faults and resubscribe, so the
+  user sees exactly which `task_id`, `context_id` and references the
+  orchestrator used, and when it broke the rules above.
+- **Surfaces.** Web: Assistant page with a step timeline and the response-mode
+  switch. CLI: `a2a-workbench assist "<goal>" --agents a,b --provider anthropic
+  [--response-mode rewrite|pass-through] --json` (NDJSON steps). MCP: `assist`.
+
+### 5.6.1 Integrate tab — calling an agent from your own agent
+
+Per agent, generated from its card and following the same rules as §5.6:
+
+- **Code** for the plain `a2a-sdk` client (resolve card, authenticate with the
+  card's schemes, send/stream, `input_required` continuation, follow-ups with
+  `reference_task_ids`, resubscribe after a dropped stream, artifacts as
+  results, `auth_required` delegated to the caller), and wrappers around it
+  for Google ADK (`RemoteA2aAgent`), LangGraph/LangChain (tool), OpenAI Agents
+  SDK and Claude Agent SDK (function tools). Secrets are read from environment
+  variables, never written into the code. Each rule in the generated code
+  carries a comment citing its spec section. The plain-SDK snippet runs in CI
+  against the zoo; the wrappers are checked for syntax and imports.
+- **Presentation guidance.** A2A leaves presentation to the client; the guide
+  describes both response modes and recommends passing artifacts through
+  as-is, attributing agent questions, and never answering an agent's
+  questions with invented details.
+- **Readiness.** Missing REQUIRED `AgentSkill` fields (`id`, `name`,
+  `description`, `tags`) are spec issues. Everything else is advice, never a
+  failure: skills without `examples`, missing input/output modes, a vague or
+  very long description, usage instructions in the description instead of
+  skills, an extended card declared but not configured.
+- **Surfaces.** Web: Integrate tab. CLI: `a2a-workbench integrate <agent>
+  --target sdk|adk|langgraph|openai|claude`. MCP: `integration_guide`.
 
 ### 5.7 `faults/` — failure injection and recovery
 
@@ -472,20 +564,24 @@ lost → Resubscribe / Check status" with gap analysis). CLI: `tasks`,
 Vault, all schemes and all OAuth flows, OIDC, mTLS, requirement evaluator,
 `auth_required` resume, Security tab. Zoo: `auth-*` and the mock IdP.
 
-**Phase 4 — Push notifications**
+**Phase 4 — Agent-calling mode (Assistant) and Integrate**
+LLM adapters (Anthropic, then OpenAI + compatible, then Gemini), tool builder
+from the card, run loop with the §5.6 rules, response modes (rewrite and
+pass-through), step UI, limits, Integrate tab with generated code for the
+plain SDK, ADK, LangGraph/LangChain, OpenAI Agents SDK and Claude Agent SDK.
+CLI `assist` and `integrate`, MCP `assist` and `integration_guide`. Tests use
+a scripted mock LLM against the zoo.
+
+**Phase 5 — Push notifications**
 Push config CRUD, webhook receiver, token and auth validation, tunnel
 support, Notifications tab and inbox, push events in chat.
 
-**Phase 5 — Health**
+**Phase 6 — Health**
 Check engine, passive checks in Inspect, active suites for areas A–L
 (including the Resilience suite, which runs fault profiles), cross-interface
 runs, Health tab and global Health checks page, JSON/HTML reports,
 `a2a-workbench check` CLI and the `run_health_check` MCP tool, `docs/agents.md`
 and the Claude Code skill. Zoo: `broken-*` agents, with one or more per check.
-
-**Phase 6 — Assistant**
-LLM adapters (Anthropic, then OpenAI + compatible, then Gemini), tool builder,
-run loop, step UI, limits.
 
 **Phase 7 — Hosted instance and v1.0 release**
 Hosted mode (sign-in, per-user workspaces, SSRF guard, rate limits,

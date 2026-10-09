@@ -37,12 +37,18 @@ export function AgentBubble({
   onInspect,
   onResubscribe,
   onCheckStatus,
+  onSignIn,
+  onRetry,
+  onContinue,
 }: {
   turn: AgentTurn;
   agentName: string;
   onInspect?: (exchangeId: string) => void;
   onResubscribe?: () => void;
   onCheckStatus?: () => void;
+  onSignIn?: () => void;
+  onRetry?: () => void;
+  onContinue?: () => void;
 }) {
   const first = turn.events[0];
   const last = turn.events[turn.events.length - 1];
@@ -80,7 +86,23 @@ export function AgentBubble({
           );
         })}
         {turn.current && INTERRUPTED.has(turn.current) ? (
-          <AskCard message={turn.statusMessage} state={turn.current} />
+          <>
+            <AskCard message={turn.statusMessage} state={turn.current} />
+            {turn.current === "auth_required" && (
+              <div className="chips">
+                {onSignIn && (
+                  <button className="chipbtn" onClick={onSignIn}>
+                    Sign in
+                  </button>
+                )}
+                {onContinue && (
+                  <button className="chipbtn" onClick={onContinue} title="Send a message to resume the task">
+                    Continue
+                  </button>
+                )}
+              </div>
+            )}
+          </>
         ) : (
           turn.statusMessage && (
             <div style={{ color: turn.current && RUNNING.has(turn.current) ? "var(--muted)" : undefined, marginBottom: 6 }}>
@@ -102,6 +124,20 @@ export function AgentBubble({
               {turn.error.code !== undefined && turn.error.code !== null ? `(${turn.error.code}) ` : ""}
               {turn.error.message}
             </div>
+            {turn.error.category === "auth" && (
+              <div className="chips">
+                {onSignIn && (
+                  <button className="chipbtn" onClick={onSignIn}>
+                    Sign in
+                  </button>
+                )}
+                {onRetry && (
+                  <button className="chipbtn" onClick={onRetry}>
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
         <EventLog events={turn.events} onInspect={onInspect} />

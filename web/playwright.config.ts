@@ -15,6 +15,16 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      command: "cd ../server && uv run a2a-workbench fixtures --port 9890 --auth oauth --idp-port 9893",
+      url: "http://127.0.0.1:9890/.well-known/agent-card.json",
+      reuseExistingServer: false,
+    },
+    {
+      command: "cd ../server && uv run a2a-workbench fixtures --port 9894 --auth apikey-query",
+      url: "http://127.0.0.1:9894/.well-known/agent-card.json",
+      reuseExistingServer: false,
+    },
+    {
       command: `rm -rf ${home} && cd ../server && A2AW_HOME=${home} uv run a2a-workbench serve --port 8585`,
       url: "http://127.0.0.1:8585/api/health",
       reuseExistingServer: false,

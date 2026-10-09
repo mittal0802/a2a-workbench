@@ -306,3 +306,6 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .markdown p{margin:.3em 0}.markdown ul,.markdown ol{padding-left:1.3em}.markdown code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:1px 4px;border-radius:4px}
 .markdown pre{background:var(--soft);padding:10px;border-radius:10px;overflow:auto}
 .part-img{max-width:280px;max-height:220px;border-radius:10px;border:1px solid var(--line)}
+.codewrap{position:relative}
+.codewrap .copy{position:absolute;top:6px;right:6px;padding:3px 8px;font-size:11.5px;background:var(--surface);border:1px solid var(--line);opacity:.85;z-index:1}
+.codewrap:hover .copy{opacity:1}
