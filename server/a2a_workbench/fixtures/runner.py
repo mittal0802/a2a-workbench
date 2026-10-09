@@ -34,6 +34,7 @@ class ZooServer:
         legacy: bool = False,
         auth: str = "none",
         idp: Any = None,
+        extended_configured: bool = True,
     ) -> None:
         self.host = host
         self.port = port or free_port(host)
@@ -48,6 +49,7 @@ class ZooServer:
             legacy=legacy,
             auth=auth,
             idp=idp,
+            extended_configured=extended_configured,
         )
         self._server = uvicorn.Server(
             uvicorn.Config(app, host=host, port=self.port, log_level="warning", lifespan="on")

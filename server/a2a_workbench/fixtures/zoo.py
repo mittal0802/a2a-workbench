@@ -306,6 +306,7 @@ def build_zoo_app(
     legacy: bool = False,
     auth: str = "none",
     idp: Any = None,
+    extended_configured: bool = True,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
@@ -314,6 +315,9 @@ def build_zoo_app(
     0.3 and every binding is served through the SDK's v0.3 compatibility layer.
     ``auth`` selects the security scheme the card declares and the A2A
     endpoints enforce (the card and JWKS stay public).
+
+    With ``extended_configured=False`` the card still declares an extended card but
+    none is configured, so GetExtendedAgentCard answers ExtendedAgentCardNotConfiguredError.
     """
     host = base_url.split("://", 1)[1].split(":", 1)[0]
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
@@ -372,7 +376,9 @@ def build_zoo_app(
         agent_executor=ZooExecutor(),
         task_store=InMemoryTaskStore(),
         agent_card=card,
-        extended_agent_card=extended if card.capabilities.extended_agent_card else None,
+        extended_agent_card=(
+            extended if card.capabilities.extended_agent_card and extended_configured else None
+        ),
     )
 
     async def jwks(_: Request) -> JSONResponse:

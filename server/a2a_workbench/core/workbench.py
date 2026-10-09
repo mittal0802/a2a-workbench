@@ -13,6 +13,7 @@ from a2a_workbench.core.bus import EventBus
 from a2a_workbench.core.config import Settings
 from a2a_workbench.core.conversations.service import ConversationService
 from a2a_workbench.core.exchanges import ExchangeStore
+from a2a_workbench.core.integrate.service import IntegrationService
 from a2a_workbench.core.registry.service import AgentService
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Workspace
@@ -38,6 +39,7 @@ class Workbench:
         )
         self.tasks = TaskService(self.agents, self.exchanges, self.auth)
         self.assistant = AssistantService(self)
+        self.integrate = IntegrationService(self.agents)
 
     async def start(self) -> None:
         """Create the state directory, the schema and the default workspace."""
