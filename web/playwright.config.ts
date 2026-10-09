@@ -25,6 +25,11 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      command: "cd ../server && uv run a2a-workbench fixtures --llm --port 9897",
+      url: "http://127.0.0.1:9897/ready",
+      reuseExistingServer: false,
+    },
+    {
       command: `rm -rf ${home} && cd ../server && A2AW_HOME=${home} uv run a2a-workbench serve --port 8585`,
       url: "http://127.0.0.1:8585/api/health",
       reuseExistingServer: false,

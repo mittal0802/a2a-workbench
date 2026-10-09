@@ -361,9 +361,24 @@ def fixtures(
         int | None,
         typer.Option(help="Mock identity provider port for oauth/oidc (default: HTTP port + 3)."),
     ] = None,
+    llm: Annotated[
+        bool,
+        typer.Option(
+            "--llm", help="Serve the scripted test LLM (OpenAI-compatible) instead of an agent."
+        ),
+    ] = False,
 ) -> None:
-    """Run the zoo reference agent until interrupted."""
+    """Run the zoo reference agent (or, with --llm, the scripted test LLM) until interrupted."""
     import uvicorn
+
+    if llm:
+        from a2a_workbench.fixtures.llm import build_fake_openai_app
+
+        typer.echo(
+            f"Scripted test LLM at http://{host}:{port}/v1 (provider openai, any API key)", err=True
+        )
+        uvicorn.run(build_fake_openai_app([]), host=host, port=port)
+        return
 
     from a2a_workbench.fixtures.zoo import build_zoo_app
 
