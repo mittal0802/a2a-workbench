@@ -17,6 +17,7 @@ from a2a_workbench.core.integrate.service import IntegrationService
 from a2a_workbench.core.push.hooks import HookStore
 from a2a_workbench.core.push.receiver import Receiver
 from a2a_workbench.core.push.service import PushService
+from a2a_workbench.core.push.tunnel import Tunnel
 from a2a_workbench.core.registry.service import AgentService
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Workspace
@@ -42,8 +43,9 @@ class Workbench:
         )
         self.tasks = TaskService(self.agents, self.exchanges, self.auth)
         self.push = PushService(self.tasks)
-        self.tunnel_url: str | None = None
+        self.tunnel = Tunnel()
         self.hooks = HookStore(self.db, self.public_base_url)
+        self.conversations.hooks = self.hooks
         self.receiver = Receiver(self.db, self.hooks, self.conversations, self.bus)
         self.assistant = AssistantService(self)
         self.integrate = IntegrationService(self.agents)
@@ -52,8 +54,8 @@ class Workbench:
         """Base URL agents reach this server at: the setting, a tunnel, or the bind address."""
         if self.settings.public_base_url:
             return self.settings.public_base_url.rstrip("/")
-        if self.tunnel_url:
-            return self.tunnel_url.rstrip("/")
+        if self.tunnel.url:
+            return self.tunnel.url.rstrip("/")
         host = (
             self.settings.host if self.settings.host not in ("0.0.0.0", "::", "") else "127.0.0.1"
         )
@@ -71,6 +73,7 @@ class Workbench:
     async def close(self) -> None:
         """Stop Assistant turns and release database connections."""
         await self.assistant.close()
+        await self.tunnel.stop()
         await self.db.dispose()
 
     @classmethod

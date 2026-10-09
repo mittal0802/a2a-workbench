@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from a2a_workbench.core.bus import EventBus
-from a2a_workbench.core.connection.recorder import Exchange
+from a2a_workbench.core.connection.recorder import Exchange, scrub_exchange
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import ExchangeRow
 
@@ -40,7 +40,11 @@ class ExchangeStore:
         self._bus = bus
 
     async def __call__(self, exchange: Exchange) -> None:
-        """Persist ``exchange``, replacing any earlier record of it, and publish its summary."""
+        """Persist ``exchange``, replacing any earlier record of it, and publish its summary.
+
+        Bodies are masked by the active recording scope first (``scrub_exchange``).
+        """
+        scrub_exchange(exchange)
         record = exchange.to_record()
         async with self._db.sessions() as session:
             await session.merge(

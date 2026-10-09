@@ -8,12 +8,14 @@ from datetime import datetime
 from typing import Any
 
 from a2a.types import (
+    AuthenticationInfo,
     CancelTaskRequest,
     GetTaskRequest,
     Message,
     Role,
     StreamResponse,
     SubscribeToTaskRequest,
+    TaskPushNotificationConfig,
 )
 from pydantic import BaseModel
 from sqlalchemy import delete, select
@@ -127,6 +129,7 @@ class ConversationService:
         self._auth = auth
         self._db = db
         self._bus = bus
+        self.hooks: Any = None
         self._sink = sink
         self._blobs = blobs
         self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -599,8 +602,24 @@ class ConversationService:
         )
         card = card_from_json(agent.card)
         assembler = ArtifactAssembler()
+        push_config, hook = None, None
+        if options.push and self.hooks is not None:
+            hook = await self.hooks.create(
+                agent.id, task_id=task_id, conversation_id=conversation_id
+            )
+            push_config = TaskPushNotificationConfig(
+                id=hook.id,
+                url=hook.url,
+                token=hook.token,
+                authentication=AuthenticationInfo(
+                    scheme=hook.auth_scheme, credentials=hook.credentials
+                ),
+            )
         with recording_scope(
-            "send_message", agent_id=agent.id, conversation_id=conversation_id
+            "send_message",
+            agent_id=agent.id,
+            conversation_id=conversation_id,
+            secrets=(hook.token, hook.credentials) if hook else (),
         ) as scope:
             seen_task, seen_state, received = task_id, None, 0
             self._open_streams[conversation_id] += 1
@@ -620,7 +639,7 @@ class ConversationService:
                 )
                 async with client:
                     stream = client.send_message(
-                        build_request(message, options),
+                        build_request(message, options, push_config),
                         context=build_call_context(options, plan.headers),
                     )
                     async for resp in stream:
@@ -635,6 +654,8 @@ class ConversationService:
                         seen_task = event.task_id or seen_task
                         seen_state = event.data.get("state", seen_state)
                         received += 1
+                        if hook is not None and seen_task:
+                            await self.hooks.bind_task(hook.id, seen_task)
                         yield event
             except Exception as exc:
                 yield await self._failure(
