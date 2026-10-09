@@ -114,7 +114,7 @@ function CredentialForm({ scheme, onSave, saving }: { scheme: SchemeOverview; on
   );
 }
 
-function SchemeCard({ agentId, scheme, needed }: { agentId: string; scheme: SchemeOverview; needed: boolean }) {
+export function SchemeCard({ agentId, scheme, needed }: { agentId: string; scheme: SchemeOverview; needed: boolean }) {
   const qc = useQueryClient();
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["security", agentId] });

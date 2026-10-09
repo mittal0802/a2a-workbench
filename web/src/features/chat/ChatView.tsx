@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ConfirmButton } from "../../components/ConfirmButton";
+import { SignInDialog } from "../security/SignInDialog";
 import { api } from "../../lib/api";
 import { INTERRUPTED, RUNNING } from "../../lib/labels";
 import { toPartInputs } from "../../lib/parts";
@@ -18,9 +19,7 @@ export function ChatView({
   conversationId,
   onConversationChange,
   onInspect,
-  onOpenSecurity,
 }: {
-  onOpenSecurity?: () => void;
   agent: Agent;
   prefill?: string;
   conversationId: string | null;
@@ -39,6 +38,31 @@ export function ChatView({
 
   const { events, taskState } = useConversation(conversationId);
   const turns = buildTurns(events);
+  const [signIn, setSignIn] = useState<{ index: number; action: "retry" | "continue"; reason?: string } | null>(null);
+  const [prompted, setPrompted] = useState<Set<string>>(new Set());
+  const lastTurn = turns[turns.length - 1];
+  const authNeed =
+    lastTurn?.kind === "agent"
+      ? lastTurn.error?.category === "auth"
+        ? { action: "retry" as const, reason: lastTurn.error.message, key: `e${lastTurn.events.at(-1)?.seq}` }
+        : lastTurn.current === "auth_required"
+          ? { action: "continue" as const, reason: undefined, key: `a${lastTurn.events.at(-1)?.seq}` }
+          : null
+      : null;
+  useEffect(() => {
+    if (!authNeed || prompted.has(`${conversationId}:${authNeed.key}`)) return;
+    setPrompted((p) => new Set(p).add(`${conversationId}:${authNeed.key}`));
+    setSignIn({ index: turns.length - 1, action: authNeed.action, reason: authNeed.reason });
+  }, [authNeed?.key, conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const retryTurn = (i: number) => {
+    const prev = turns[i - 1];
+    if (prev?.kind === "user")
+      send.mutate({
+        parts: toPartInputs(prev.event.data.message?.parts ?? []),
+        options: { ...DEFAULT_OPTIONS, ...(prev.event.data.options ?? {}) },
+      });
+  };
+  const continueTask = () => send.mutate({ parts: [{ kind: "text", text: "I've signed in." }], options: DEFAULT_OPTIONS });
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
     bottom.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
@@ -106,18 +130,15 @@ export function ChatView({
                 turn={t}
                 agentName={agent.name}
                 onInspect={onInspect}
-                onSignIn={onOpenSecurity}
-                onRetry={() => {
-                  const prev = turns[i - 1];
-                  if (prev?.kind === "user")
-                    send.mutate({
-                      parts: toPartInputs(prev.event.data.message?.parts ?? []),
-                      options: { ...DEFAULT_OPTIONS, ...(prev.event.data.options ?? {}) },
-                    });
-                }}
-                onContinue={() =>
-                  send.mutate({ parts: [{ kind: "text", text: "I've signed in." }], options: DEFAULT_OPTIONS })
+                onSignIn={() =>
+                  setSignIn({
+                    index: i,
+                    action: t.current === "auth_required" ? "continue" : "retry",
+                    reason: t.error?.message,
+                  })
                 }
+                onRetry={() => retryTurn(i)}
+                onContinue={continueTask}
                 onResubscribe={() => resubscribe.mutate()}
                 onCheckStatus={() => checkStatus.mutate()}
               />
@@ -127,6 +148,19 @@ export function ChatView({
           <div ref={bottom} />
         </div>
       </div>
+      <SignInDialog
+        agentId={agent.id}
+        agentName={agent.name}
+        open={signIn !== null}
+        reason={signIn?.reason}
+        action={signIn?.action ?? "retry"}
+        onOpenChange={(v) => !v && setSignIn(null)}
+        onDone={() => {
+          if (!signIn) return;
+          if (signIn.action === "retry") retryTurn(signIn.index);
+          else continueTask();
+        }}
+      />
       <Composer
         agent={agent}
         prefill={prefill}
