@@ -30,6 +30,10 @@ export function useConversation(conversationId: string | null) {
   });
   const [live, setLive] = useState<TimelineEvent[]>([]);
   const lastSeq = query.data?.conversation.last_seq;
+  const [history, setHistory] = useState<{ id: string | null; seq: number | null }>({ id: null, seq: null });
+  if (conversationId && query.data && history.id !== conversationId) {
+    setHistory({ id: conversationId, seq: query.data.conversation.last_seq ?? 0 });
+  }
 
   useEffect(() => {
     setLive([]);
@@ -44,5 +48,6 @@ export function useConversation(conversationId: string | null) {
 
   const events = useMemo(() => mergeEvents(query.data?.events ?? [], live), [query.data, live]);
   const taskState = useMemo(() => currentTaskState(events), [events]);
-  return { conversation: query.data?.conversation ?? null, events, taskState };
+  const historySeq = history.id === conversationId ? history.seq : null;
+  return { conversation: query.data?.conversation ?? null, events, taskState, historySeq };
 }

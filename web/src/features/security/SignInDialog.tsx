@@ -74,7 +74,7 @@ export function SignInDialog({
                   </button>
                 </div>
               )}
-              <div className="cards" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
+              <div className="cards" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
                 {shown.map((scheme) =>
                   scheme.type === "oauth2" || scheme.type === "openIdConnect" ? (
                     <OAuthCard key={scheme.name} agentId={agentId} scheme={scheme} requiredScopes={s?.required_scopes?.[scheme.name] ?? []} needed={!!s?.missing.includes(scheme.name)} />
