@@ -1,5 +1,6 @@
 """Google Gemini adapter (google-genai)."""
 
+import base64
 import json
 import uuid
 from typing import Any
@@ -35,7 +36,10 @@ def _contents(messages: list[ChatMessage]) -> list[types.Content]:
         elif m.role == "assistant":
             parts = [types.Part(text=m.text)] if m.text else []
             parts += [
-                types.Part(function_call=types.FunctionCall(id=c.id, name=c.name, args=c.arguments))
+                types.Part(
+                    function_call=types.FunctionCall(id=c.id, name=c.name, args=c.arguments),
+                    thought_signature=base64.b64decode(c.signature) if c.signature else None,
+                )
                 for c in m.tool_calls
             ]
             out.append(types.Content(role="model", parts=parts))
@@ -119,6 +123,9 @@ class GeminiAdapter:
                 id=p.function_call.id or uuid.uuid4().hex,
                 name=p.function_call.name or "",
                 arguments=dict(p.function_call.args or {}),
+                signature=base64.b64encode(p.thought_signature).decode()
+                if p.thought_signature
+                else None,
             )
             for p in parts
             if p.function_call

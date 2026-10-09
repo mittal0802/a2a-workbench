@@ -24,6 +24,8 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    signature: str | None = None
+    """Opaque provider token that must be sent back with the call (Gemini thought signature)."""
 
 
 class ChatMessage(BaseModel):

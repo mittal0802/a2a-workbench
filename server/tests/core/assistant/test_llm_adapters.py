@@ -236,3 +236,55 @@ async def test_wrong_endpoint_names_the_status_and_url(canned, provider, suffix)
         )
     assert "404" in str(info.value) and canned.url in str(info.value)
     assert info.value.category == "provider" and "sk-zzz-secret" not in str(info.value)
+
+
+async def test_gemini_thought_signature_round_trips(canned):
+    canned.replies.append(
+        (
+            200,
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "role": "model",
+                            "parts": [
+                                {
+                                    "functionCall": {"name": "call_zoo", "args": {"message": "x"}},
+                                    "thoughtSignature": "c2lnLTE=",
+                                }
+                            ],
+                        },
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1},
+            },
+        )
+    )
+    adapter = adapter_for("gemini", "gemini-x", "g-secret", base_url=canned.url)
+    reply = await adapter.complete("SYS", [ChatMessage(role="user", text="hi")], TOOLS)
+    assert reply.tool_calls[0].signature == "c2lnLTE="
+    canned.replies.append(
+        (
+            200,
+            {
+                "candidates": [
+                    {
+                        "content": {"role": "model", "parts": [{"text": "ok"}]},
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {},
+            },
+        )
+    )
+    history = [
+        ChatMessage(role="user", text="hi"),
+        ChatMessage(role="assistant", tool_calls=reply.tool_calls),
+        ChatMessage(
+            role="tool", tool_call_id=reply.tool_calls[0].id, tool_name="call_zoo", text="{}"
+        ),
+    ]
+    await adapter.complete("SYS", history, TOOLS)
+    sent = canned.requests[1]["body"]["contents"][1]["parts"][0]
+    assert sent["thoughtSignature"] == "c2lnLTE=" and sent["functionCall"]["name"] == "call_zoo"
