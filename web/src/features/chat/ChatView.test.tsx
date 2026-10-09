@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -132,5 +133,27 @@ describe("ChatView sign-in", () => {
     await pushLive();
     await screen.findAllByRole("button", { name: /^sign in$/i });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("pops up for the first 401 in a conversation the chat just created", async () => {
+    hubHandlers.length = 0;
+    vi.spyOn(api, "listConversations").mockResolvedValue([] as never);
+    vi.spyOn(api, "createConversation").mockResolvedValue({ id: "cv1", agent_id: "ag1", title: "hello", origin: "chat" } as never);
+    vi.spyOn(api, "sendMessage").mockResolvedValue({ accepted: true } as never);
+    vi.spyOn(api, "getConversation").mockResolvedValue(authFailed as never);
+    vi.spyOn(api, "security").mockResolvedValue(security(null) as never);
+    function Harness() {
+      const [id, setId] = useState<string | null>(null);
+      return <ChatView agent={{ id: "ag1", name: "Zoo", card: { capabilities: {} } } as never} conversationId={id} onConversationChange={setId} />;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <Harness />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await userEvent.type(screen.getByPlaceholderText(/message/i), "hello{Enter}");
+    expect(await screen.findByRole("dialog", { name: /sign in to zoo/i })).toBeInTheDocument();
   });
 });
