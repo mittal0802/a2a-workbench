@@ -288,3 +288,70 @@ async def test_gemini_thought_signature_round_trips(canned):
     await adapter.complete("SYS", history, TOOLS)
     sent = canned.requests[1]["body"]["contents"][1]["parts"][0]
     assert sent["thoughtSignature"] == "c2lnLTE=" and sent["functionCall"]["name"] == "call_zoo"
+
+
+@pytest.mark.parametrize(
+    "provider,suffix,reply",
+    [
+        (
+            "anthropic",
+            "",
+            {
+                "id": "m",
+                "type": "message",
+                "role": "assistant",
+                "model": "m",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        ),
+        (
+            "gemini",
+            "",
+            {
+                "candidates": [
+                    {
+                        "content": {"role": "model", "parts": [{"text": "ok"}]},
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {},
+            },
+        ),
+        (
+            "openai",
+            "/v1",
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "m",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "ok"},
+                    }
+                ],
+            },
+        ),
+    ],
+)
+async def test_empty_turns_are_not_sent(canned, provider, suffix, reply):
+    canned.replies.append((200, reply))
+    history = [
+        ChatMessage(role="user", text="hi"),
+        ChatMessage(role="assistant", text=""),
+        ChatMessage(role="user", text=""),
+    ]
+    await adapter_for(provider, "m", "k-123456", base_url=canned.url + suffix).complete(
+        "SYS", history, TOOLS
+    )
+    body = canned.requests[0]["body"]
+    turns = body.get("messages") or body.get("contents")
+    texts = json.dumps(turns)
+    assert '"content": []' not in texts and '"parts": []' not in texts
+    roles = [t["role"] for t in turns if t["role"] != "system"]
+    assert roles == ["user"]

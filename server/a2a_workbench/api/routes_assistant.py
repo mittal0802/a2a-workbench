@@ -74,8 +74,10 @@ async def create_session(body: SessionIn, wb: Workbench = Depends(get_workbench)
 async def get_session(
     session_id: str, after_seq: int = 0, wb: Workbench = Depends(get_workbench)
 ) -> dict[str, Any]:
-    session = await wb.assistant.get(session_id)
+    # Steps first: a turn saves its status before emitting steps, so the session read
+    # afterwards is never older than the steps returned.
     steps = await wb.assistant.steps(session_id, after_seq)
+    session = await wb.assistant.get(session_id)
     return {
         "session": session.model_dump(mode="json"),
         "steps": [s.model_dump(mode="json") for s in steps],

@@ -80,6 +80,16 @@ class LLMAdapter(Protocol):
     ) -> LLMReply: ...
 
 
+def sendable(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Drop turns providers reject: user turns without text, assistant turns with no content."""
+    return [
+        m
+        for m in messages
+        if not (m.role == "user" and not m.text.strip())
+        and not (m.role == "assistant" and not m.text and not m.tool_calls)
+    ]
+
+
 def scrub_key(text: str, api_key: str) -> str:
     """Return ``text`` with ``api_key`` masked."""
     return text.replace(api_key, "••••") if api_key else text

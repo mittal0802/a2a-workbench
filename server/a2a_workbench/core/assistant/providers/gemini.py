@@ -17,6 +17,7 @@ from a2a_workbench.core.assistant.llm import (
     ToolSpec,
     Usage,
     scrub_key,
+    sendable,
 )
 
 
@@ -99,7 +100,7 @@ class GeminiAdapter:
         )
         try:
             resp = await self._client.aio.models.generate_content(
-                model=self._model, contents=_contents(messages), config=config
+                model=self._model, contents=_contents(sendable(messages)), config=config
             )
         except errors.ClientError as exc:
             category = (

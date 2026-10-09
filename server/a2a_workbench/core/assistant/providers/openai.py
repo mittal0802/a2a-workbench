@@ -14,6 +14,7 @@ from a2a_workbench.core.assistant.llm import (
     ToolSpec,
     Usage,
     scrub_key,
+    sendable,
 )
 
 
@@ -79,7 +80,7 @@ class OpenAIAdapter:
         try:
             resp = await self._client.chat.completions.create(
                 model=self._model,
-                messages=_messages(system, messages),  # type: ignore[arg-type]
+                messages=_messages(system, sendable(messages)),  # type: ignore[arg-type]
                 max_completion_tokens=MAX_OUTPUT_TOKENS,
                 **kwargs,
             )

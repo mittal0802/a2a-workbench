@@ -13,6 +13,7 @@ from a2a_workbench.core.assistant.llm import (
     ToolSpec,
     Usage,
     scrub_key,
+    sendable,
 )
 
 
@@ -65,7 +66,7 @@ class AnthropicAdapter:
                 model=self._model,
                 max_tokens=MAX_OUTPUT_TOKENS,
                 system=system,
-                messages=_messages(messages),  # type: ignore[arg-type]
+                messages=_messages(sendable(messages)),  # type: ignore[arg-type]
                 tools=[
                     {"name": t.name, "description": t.description, "input_schema": t.input_schema}
                     for t in tools
