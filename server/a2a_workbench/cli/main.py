@@ -42,6 +42,8 @@ auth_app = typer.Typer(no_args_is_help=True, help="Sign in to agents and check e
 app.add_typer(auth_app, name="auth")
 providers_app = typer.Typer(no_args_is_help=True, help="API keys of the Assistant's LLM providers.")
 app.add_typer(providers_app, name="providers")
+chats_app = typer.Typer(no_args_is_help=True, help="Assistant chats: list, raw LLM calls, delete.")
+app.add_typer(chats_app, name="chats")
 
 FaultsOpt = Annotated[
     str | None,
@@ -1104,6 +1106,70 @@ def integrate(
         typer.echo(f"# {name}: {meaning}", err=True)
     for f in guide.readiness:
         typer.echo(f"# {f.level}: {f.message} ({f.path})", err=True)
+
+
+@chats_app.command("list")
+def chats_list(as_json: JsonFlag = False) -> None:
+    """List Assistant chats, newest first."""
+
+    async def go() -> list[Any]:
+        async with Workbench.open(Settings()) as wb:
+            return await wb.assistant.list()
+
+    chats = _run(go())
+    if as_json:
+        print_json([c.model_dump(mode="json") for c in chats])
+        return
+    for c in chats:
+        typer.echo(f"{c.id}  {c.status:<16} {c.provider}/{c.model}  {c.title}")
+
+
+@chats_app.command("calls")
+def chats_calls(
+    session: Annotated[str, typer.Argument(help="Assistant chat id.")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Show the raw HTTP calls made to the LLM provider in a chat (keys masked)."""
+
+    async def go() -> list[Any]:
+        async with Workbench.open(Settings()) as wb:
+            calls = await wb.exchanges.list(conversation_id=session)
+            return [await wb.exchanges.get(c["id"]) for c in calls if c["operation"] == "llm_call"]
+
+    calls = _run(go())
+    if as_json:
+        print_json(calls)
+        return
+    for c in calls:
+        typer.echo(
+            f"{c['started_at']}  {c['http_method']} {c['url']} → {c['status']}"
+            f" · {c['duration_ms']} ms"
+        )
+
+
+@chats_app.command("delete")
+def chats_delete(
+    chat_id: Annotated[str, typer.Argument(help="Assistant chat id or agent conversation id.")],
+) -> None:
+    """Delete an Assistant chat (with its steps and LLM calls) or an agent conversation."""
+    from a2a_workbench.core.assistant.service import SessionNotFoundError
+    from a2a_workbench.core.conversations.service import ConversationNotFoundError
+
+    async def go() -> str:
+        async with Workbench.open(Settings()) as wb:
+            try:
+                await wb.assistant.delete(chat_id)
+                return "Assistant chat"
+            except SessionNotFoundError:
+                pass
+            try:
+                await wb.conversations.delete(chat_id)
+                return "conversation"
+            except ConversationNotFoundError:
+                _fail("workbench", f"no chat or conversation {chat_id}", False, ExitCode.USAGE)
+
+    kind = _run(go())
+    typer.echo(f"Deleted {kind} {chat_id}")
 
 
 def main() -> None:

@@ -172,3 +172,34 @@ def test_cli_session_keeps_the_chat_mode_unless_given(llm, zoo):
         app, ["assist", "ask", "--session", sid, "--response-mode", "rewrite", "--json"]
     )
     assert _lines(r.stdout)[-1]["session"]["response_mode"] == "rewrite"
+
+
+def test_cli_chats_list_calls_and_delete(llm, zoo):
+    runner.invoke(
+        app,
+        ["providers", "set", "openai", "--base-url", llm.base_url],
+        env={"A2AW_LLM_API_KEY": "sk-cli-secret-4321"},
+    )
+    r = runner.invoke(
+        app,
+        [
+            "assist",
+            "echo hi",
+            "--agents",
+            zoo.base_url,
+            "--provider",
+            "openai",
+            "--model",
+            "scripted",
+            "--json",
+        ],
+    )
+    sid = _lines(r.stdout)[-1]["session"]["id"]
+    listed = json.loads(runner.invoke(app, ["chats", "list", "--json"]).stdout)
+    assert [x["id"] for x in listed] == [sid]
+    calls = json.loads(runner.invoke(app, ["chats", "calls", sid, "--json"]).stdout)
+    assert len(calls) == 2 and "choices" in calls[0]["response_body"]
+    assert "sk-cli-secret" not in json.dumps(calls)
+    assert runner.invoke(app, ["chats", "delete", sid]).exit_code == 0
+    assert json.loads(runner.invoke(app, ["chats", "list", "--json"]).stdout) == []
+    assert runner.invoke(app, ["chats", "delete", "nope"]).exit_code == 2

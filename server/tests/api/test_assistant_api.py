@@ -49,7 +49,8 @@ def _wait(c, sid, status=("idle", "awaiting_user", "awaiting_sign_in", "stopped"
     deadline = time.time() + timeout
     while time.time() < deadline:
         body = c.get(f"/api/assistant/sessions/{sid}").json()
-        if body["session"]["status"] in status and body["steps"]:
+        final = body["steps"] and body["steps"][-1]["kind"] in ("done", "paused", "limit", "error")
+        if body["session"]["status"] in status and final:
             return body
         time.sleep(0.1)
     raise AssertionError(f"session stuck: {body}")
@@ -143,3 +144,19 @@ def test_second_message_while_running_is_409(c, llm, zoo):
     r = c.post(f"/api/assistant/sessions/{s['id']}/messages", json={"text": "echo"})
     assert r.status_code == 409 and r.json()["error"]["category"] == "workbench"
     assert c.post(f"/api/assistant/sessions/{s['id']}/stop").status_code == 204
+
+
+def test_delete_chat_and_conversation_and_list_llm_calls(c, llm, zoo):
+    s = _setup(c, llm, zoo)
+    c.post(f"/api/assistant/sessions/{s['id']}/messages", json={"text": "echo hi"})
+    steps = _wait(c, s["id"])["steps"]
+    calls = c.get(f"/api/exchanges?conversation_id={s['id']}").json()
+    assert [x["operation"] for x in calls] == ["llm_call", "llm_call"]
+    assistant = [st for st in steps if st["kind"] == "assistant"]
+    assert assistant[0]["data"]["exchange_id"] == calls[0]["id"]
+    conv_id = next(st for st in steps if st["kind"] == "tool_result")["data"]["conversation_id"]
+    assert c.delete(f"/api/conversations/{conv_id}").status_code == 204
+    assert c.get(f"/api/conversations/{conv_id}").status_code == 404
+    assert c.delete(f"/api/assistant/sessions/{s['id']}").status_code == 204
+    assert c.get(f"/api/assistant/sessions/{s['id']}").status_code == 404
+    assert c.get(f"/api/exchanges?conversation_id={s['id']}").json() == []

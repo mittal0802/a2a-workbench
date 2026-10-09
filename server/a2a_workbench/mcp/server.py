@@ -544,6 +544,24 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         }
 
     @server.tool()
+    async def delete_conversation(conversation_id: str) -> dict[str, Any]:
+        """Delete an agent conversation with its events and recorded exchanges."""
+        try:
+            await wb.conversations.delete(conversation_id)
+        except Exception as exc:
+            return _error(exc)
+        return {"deleted": conversation_id}
+
+    @server.tool()
+    async def delete_assistant_chat(session_id: str) -> dict[str, Any]:
+        """Delete an Assistant chat with its steps and recorded LLM calls."""
+        try:
+            await wb.assistant.delete(session_id)
+        except Exception as exc:
+            return _error(exc)
+        return {"deleted": session_id}
+
+    @server.tool()
     async def fault_presets() -> dict[str, Any]:
         """List the built-in network fault presets usable as send_message(faults=...)."""
         return {"presets": [p.model_dump(mode="json") for p in PRESETS.values()]}

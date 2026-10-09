@@ -95,11 +95,18 @@ def scrub_key(text: str, api_key: str) -> str:
     return text.replace(api_key, "••••") if api_key else text
 
 
-def adapter_for(provider: str, model: str, api_key: str, base_url: str | None = None) -> LLMAdapter:
+def adapter_for(
+    provider: str,
+    model: str,
+    api_key: str,
+    base_url: str | None = None,
+    recorder: Any = None,
+) -> LLMAdapter:
     """Return the adapter for ``provider`` calling ``model`` with ``api_key``.
 
     ``base_url`` points the OpenAI adapter at an OpenAI-compatible server (and
-    overrides the endpoint of the others).
+    overrides the endpoint of the others). With ``recorder`` (an
+    ``LLMRecorder``), every HTTP call the provider SDK makes is recorded.
 
     Raises:
         ValueError: for an unknown provider.
@@ -107,13 +114,13 @@ def adapter_for(provider: str, model: str, api_key: str, base_url: str | None = 
     if provider == "anthropic":
         from a2a_workbench.core.assistant.providers.anthropic import AnthropicAdapter
 
-        return AnthropicAdapter(model, api_key, base_url)
+        return AnthropicAdapter(model, api_key, base_url, recorder)
     if provider == "openai":
         from a2a_workbench.core.assistant.providers.openai import OpenAIAdapter
 
-        return OpenAIAdapter(model, api_key, base_url)
+        return OpenAIAdapter(model, api_key, base_url, recorder)
     if provider == "gemini":
         from a2a_workbench.core.assistant.providers.gemini import GeminiAdapter
 
-        return GeminiAdapter(model, api_key, base_url)
+        return GeminiAdapter(model, api_key, base_url, recorder)
     raise ValueError(f"unknown provider '{provider}' (use one of {', '.join(PROVIDERS)})")

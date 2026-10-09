@@ -16,7 +16,7 @@ from a2a.types import (
     SubscribeToTaskRequest,
 )
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from a2a_workbench.core.a2a_json import (
     INTERRUPTED_STATES,
@@ -216,6 +216,21 @@ class ConversationService:
         if conv is None:
             raise ConversationNotFoundError(f"conversation {conversation_id} not found")
         return _out(conv)
+
+    async def delete(self, conversation_id: str) -> None:
+        """Delete a conversation with its timeline events and recorded exchanges.
+
+        Raises:
+            ConversationNotFoundError: if it does not exist.
+        """
+        await self._load(conversation_id)
+        async with self._db.sessions() as session:
+            await session.execute(
+                delete(TimelineEventRow).where(TimelineEventRow.conversation_id == conversation_id)
+            )
+            await session.execute(delete(Conversation).where(Conversation.id == conversation_id))
+            await session.commit()
+        await self._sink.delete_for(conversation_id)  # type: ignore[attr-defined]
 
     async def list_for_agent(self, agent_id: str) -> list[ConversationOut]:
         """Return an agent's conversations, most recently updated first."""

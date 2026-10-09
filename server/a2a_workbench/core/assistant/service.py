@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -10,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from a2a_workbench.core.a2a_json import card_from_json
 from a2a_workbench.core.assistant.executor import (
@@ -30,6 +31,7 @@ from a2a_workbench.core.assistant.llm import (
     adapter_for,
 )
 from a2a_workbench.core.assistant.prompt import RESULT_MARKER, SYSTEM_PROMPT
+from a2a_workbench.core.assistant.recording import LLMRecorder
 from a2a_workbench.core.assistant.tools import (
     AgentTool,
     CallRejected,
@@ -38,6 +40,7 @@ from a2a_workbench.core.assistant.tools import (
     validate_call,
 )
 from a2a_workbench.core.conversations.timeline import TimelineEvent
+from a2a_workbench.core.registry.service import AgentNotFoundError
 from a2a_workbench.core.store.models import (
     DEFAULT_WORKSPACE_ID,
     AssistantSession,
@@ -419,7 +422,7 @@ class AssistantService:
             await self._append(sid, ChatMessage(role="user", text=text))
         await self._loop(sid)
 
-    async def _adapter(self, row: AssistantSession) -> LLMAdapter | None:
+    async def _adapter(self, row: AssistantSession) -> tuple[LLMAdapter, LLMRecorder] | None:
         found = await self._wb.provider_keys.get(row.provider)
         if found is None:
             env = " or ".join(ENV_VARS.get(row.provider, ()))
@@ -435,26 +438,55 @@ class AssistantService:
             )
             return None
         key, base_url = found
-        return self._adapters(row.provider, row.model, key, base_url)
+        recorder = LLMRecorder(self._wb.exchanges, session_id=row.id)
+        return self._adapters(row.provider, row.model, key, base_url, recorder=recorder), recorder
 
     async def _tools(self, row: AssistantSession) -> list[AgentTool]:
-        agents = [await self._wb.agents.get(a) for a in row.agent_ids]
+        agents = []
+        for agent_id in row.agent_ids:
+            try:
+                agents.append(await self._wb.agents.get(agent_id))
+            except AgentNotFoundError:
+                continue
         return build_tools(agents)
+
+    async def delete(self, sid: str) -> None:
+        """Stop and delete a chat with its steps and recorded LLM calls.
+
+        Raises:
+            SessionNotFoundError: if it does not exist.
+        """
+        await self._load(sid)
+        await self.stop(sid)
+        task = self._running.get(sid)
+        if task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        async with self._wb.db.sessions() as session:
+            await session.execute(
+                delete(AssistantStepRow).where(AssistantStepRow.session_id == sid)
+            )
+            await session.execute(delete(AssistantSession).where(AssistantSession.id == sid))
+            await session.commit()
+        await self._wb.exchanges.delete_for(sid)
 
     async def _loop(self, sid: str) -> None:
         row = await self._load(sid)
         limits = Limits(**(row.limits or {}))
-        adapter = await self._adapter(row)
-        if adapter is None:
+        found = await self._adapter(row)
+        if found is None:
             return
+        adapter, recorder = found
         try:
-            await self._loop_with(sid, adapter, limits)
+            await self._loop_with(sid, adapter, limits, recorder)
         finally:
             close = getattr(adapter, "aclose", None)
             if close is not None:
                 await close()
 
-    async def _loop_with(self, sid: str, adapter: LLMAdapter, limits: Limits) -> None:
+    async def _loop_with(
+        self, sid: str, adapter: LLMAdapter, limits: Limits, recorder: LLMRecorder | None = None
+    ) -> None:
         row = await self._load(sid)
         tools = await self._tools(row)
         budget = dict(row.budget or _new_budget())
@@ -477,7 +509,15 @@ class AssistantService:
                 )
             except LLMError as exc:
                 await self._save(sid, status="idle")
-                await self._emit(sid, "error", {"category": exc.category, "message": exc.message})
+                await self._emit(
+                    sid,
+                    "error",
+                    {
+                        "category": exc.category,
+                        "message": exc.message,
+                        "exchange_id": recorder.last_id if recorder else None,
+                    },
+                )
                 return
             except TimeoutError:
                 await self._limit(sid, "run_timeout", limits.run_timeout_s)
@@ -497,6 +537,7 @@ class AssistantService:
                     "tool_calls": [c.model_dump() for c in reply.tool_calls],
                     "usage": reply.usage.model_dump(),
                     "tokens_used": tokens,
+                    "exchange_id": recorder.last_id if recorder else None,
                 },
             )
             if not reply.tool_calls:

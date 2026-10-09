@@ -5,6 +5,7 @@ import json
 import uuid
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import errors, types
 
@@ -65,15 +66,24 @@ def _contents(messages: list[ChatMessage]) -> list[types.Content]:
 class GeminiAdapter:
     """Completes through ``genai.Client().aio.models.generate_content``."""
 
-    def __init__(self, model: str, api_key: str, base_url: str | None = None) -> None:
+    def __init__(
+        self, model: str, api_key: str, base_url: str | None = None, recorder: Any = None
+    ) -> None:
         self._model = model
         self._key = api_key
-        options = types.HttpOptions(base_url=base_url) if base_url else None
+        self._http = (
+            httpx.AsyncClient(event_hooks=recorder.with_secret(api_key).hooks(), timeout=120)
+            if recorder is not None
+            else None
+        )
+        options = types.HttpOptions(base_url=base_url, httpx_async_client=self._http)
         self._client = genai.Client(api_key=api_key, http_options=options)
 
     async def aclose(self) -> None:
         """Close the provider client's connections."""
         await self._client.aio.aclose()
+        if self._http is not None:
+            await self._http.aclose()
 
     async def complete(
         self, system: str, messages: list[ChatMessage], tools: list[ToolSpec]

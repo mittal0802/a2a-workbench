@@ -51,10 +51,19 @@ def _arguments(raw: str | None) -> dict[str, Any]:
 class OpenAIAdapter:
     """Completes through ``openai.AsyncOpenAI().chat.completions.create``."""
 
-    def __init__(self, model: str, api_key: str, base_url: str | None = None) -> None:
+    def __init__(
+        self, model: str, api_key: str, base_url: str | None = None, recorder: Any = None
+    ) -> None:
         self._model = model
         self._key = api_key
-        self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=1)
+        http = (
+            openai.DefaultAsyncHttpxClient(event_hooks=recorder.with_secret(api_key).hooks())
+            if recorder is not None
+            else None
+        )
+        self._client = openai.AsyncOpenAI(
+            api_key=api_key, base_url=base_url, max_retries=1, http_client=http
+        )
 
     async def aclose(self) -> None:
         """Close the provider client's connections."""

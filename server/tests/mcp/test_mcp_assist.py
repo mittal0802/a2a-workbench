@@ -65,3 +65,12 @@ async def test_mcp_integration_guide(zoo):
         assert isinstance(out["readiness"], list) and "env" in out
         full = await call(c, "integration_guide", {"agent": zoo.base_url})
         assert set(full["snippets"]) == {"sdk", "adk", "langgraph", "openai", "claude"}
+
+
+async def test_mcp_delete_tools(zoo):
+    async with connected() as c:
+        sent = await call(c, "send_message", {"agent": zoo.base_url, "text": "echo"})
+        out = await call(c, "delete_conversation", {"conversation_id": sent["conversation_id"]})
+        assert out == {"deleted": sent["conversation_id"]}
+        missing = await call(c, "delete_assistant_chat", {"session_id": "nope"})
+        assert missing["error"]["category"] == "workbench"

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from a2a_workbench.core.bus import EventBus
 from a2a_workbench.core.connection.recorder import Exchange
@@ -62,6 +62,14 @@ class ExchangeStore:
                 f"exchanges:{exchange.conversation_id}",
                 {"type": "exchange", "exchange": summarize(record)},
             )
+
+    async def delete_for(self, conversation_id: str) -> None:
+        """Delete every exchange recorded under ``conversation_id``."""
+        async with self._db.sessions() as session:
+            await session.execute(
+                delete(ExchangeRow).where(ExchangeRow.conversation_id == conversation_id)
+            )
+            await session.commit()
 
     async def get(self, exchange_id: str) -> dict[str, Any] | None:
         """Return the full record of one exchange, or None."""

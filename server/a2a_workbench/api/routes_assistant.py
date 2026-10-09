@@ -121,3 +121,9 @@ async def resume(
 async def stop(session_id: str, wb: Workbench = Depends(get_workbench)) -> Response:
     await wb.assistant.stop(session_id)
     return Response(status_code=204)
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: str, wb: Workbench = Depends(get_workbench)) -> Response:
+    await wb.assistant.delete(session_id)
+    return Response(status_code=204)
