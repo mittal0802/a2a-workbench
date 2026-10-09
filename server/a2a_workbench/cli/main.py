@@ -1055,6 +1055,41 @@ def providers_remove(provider: Annotated[str, typer.Argument()]) -> None:
     typer.echo(f"Removed {provider} key")
 
 
+@app.command()
+def integrate(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    code_for: Annotated[
+        str, typer.Option("--target", help="sdk, adk, langgraph, openai or claude.")
+    ] = "sdk",
+    as_json: JsonFlag = False,
+) -> None:
+    """Print code for calling the agent from your own agent, plus readiness advice.
+
+    With --json, prints the whole guide (every target, guidance, readiness).
+    """
+    from a2a_workbench.core.integrate.templates import TARGETS
+
+    if code_for not in TARGETS:
+        _fail("workbench", f"--target is one of {', '.join(TARGETS)}", as_json, ExitCode.USAGE)
+
+    async def go() -> Any:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            return await wb.integrate.guide(agent.id)
+
+    guide = _run(go())
+    if as_json:
+        print_json(guide.model_dump(mode="json"))
+        return
+    snippet = guide.snippets[code_for]
+    typer.echo(snippet.code)
+    typer.echo(f"# Install: {snippet.install}", err=True)
+    for name, meaning in snippet.env.items():
+        typer.echo(f"# {name}: {meaning}", err=True)
+    for f in guide.readiness:
+        typer.echo(f"# {f.level}: {f.message} ({f.path})", err=True)
+
+
 def main() -> None:
     """Run the CLI, mapping unexpected exceptions to exit code 6."""
     try:

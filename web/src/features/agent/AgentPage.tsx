@@ -8,12 +8,14 @@ import { ChatView } from "../chat/ChatView";
 import { InspectDrawer } from "../inspect/InspectDrawer";
 import { SecurityView } from "../security/SecurityView";
 import { TasksView } from "../tasks/TasksView";
+import { IntegrateView } from "../integrate/IntegrateView";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
   { id: "chat", label: "Chat" },
   { id: "tasks", label: "Tasks" },
   { id: "security", label: "Security" },
+  { id: "integrate", label: "Integrate" },
   { id: "about", label: "About" },
 ] as const;
 
@@ -114,6 +116,11 @@ export function AgentPage() {
         {tab === "security" && (
           <section className="view on">
             <SecurityView agentId={a.id} />
+          </section>
+        )}
+        {tab === "integrate" && (
+          <section className="view on">
+            <IntegrateView agentId={a.id} />
           </section>
         )}
         <section className={`view ${tab === "about" ? "on" : ""}`}>

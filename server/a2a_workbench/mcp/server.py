@@ -516,6 +516,34 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         }
 
     @server.tool()
+    async def integration_guide(agent: str, target: str | None = None) -> dict[str, Any]:
+        """Code for calling an agent from your own agent, plus guidance and readiness.
+
+        target is sdk (plain a2a-sdk), adk, langgraph, openai (Agents SDK) or claude
+        (Agent SDK); with a target, returns its code, install line and env vars,
+        otherwise every snippet. The code follows the A2A client rules (ids,
+        follow-ups, resubscribe, artifacts as results, auth_required) and reads
+        secrets from environment variables.
+        """
+        try:
+            guide = await wb.integrate.guide((await resolve(agent)).id)
+        except Exception as exc:
+            return _error(exc)
+        body = guide.model_dump(mode="json")
+        if target is None:
+            return body
+        if target not in body["snippets"]:
+            return {"error": {"category": "workbench", "message": f"unknown target '{target}'"}}
+        snippet = body["snippets"][target]
+        return {
+            "agent": body["agent"],
+            "card_url": body["card_url"],
+            **snippet,
+            "guidance": body["guidance"],
+            "readiness": body["readiness"],
+        }
+
+    @server.tool()
     async def fault_presets() -> dict[str, Any]:
         """List the built-in network fault presets usable as send_message(faults=...)."""
         return {"presets": [p.model_dump(mode="json") for p in PRESETS.values()]}

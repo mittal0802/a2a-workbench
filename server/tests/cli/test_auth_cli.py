@@ -213,3 +213,13 @@ def test_secrets_can_come_from_environment_or_stdin(bearer_zoo, oauth_zoo):
     )
     assert r.exit_code == 0, r.output
     assert IDP_CLIENT["secret"] not in r.stdout
+
+
+def test_cli_integrate_prints_code_and_json(zoo):
+    r = runner.invoke(app, ["integrate", zoo.base_url, "--target", "langgraph"])
+    assert r.exit_code == 0, r.output
+    assert "create_react_agent" in r.stdout and "call_agent" in r.stdout
+    r = runner.invoke(app, ["integrate", zoo.base_url, "--json"])
+    body = json.loads(r.stdout)
+    assert set(body["snippets"]) == {"sdk", "adk", "langgraph", "openai", "claude"}
+    assert runner.invoke(app, ["integrate", zoo.base_url, "--target", "nope"]).exit_code == 2

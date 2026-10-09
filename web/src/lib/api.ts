@@ -1,5 +1,6 @@
 import type { DiffEntry } from "../features/about/CardDiff";
 import type {
+  IntegrationGuide,
   AssistantSession,
   AssistantStep,
   NewAssistantSession,
@@ -59,6 +60,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 const json = (b: unknown) => JSON.stringify(b);
 
 export const api = {
+  integration: (agentId: string) => call<IntegrationGuide>(`/api/agents/${agentId}/integration`),
   assistantProviders: () => call<ProviderInfo[]>("/api/assistant/providers"),
   putAssistantProvider: (provider: string, body: { api_key: string; base_url?: string | null }) =>
     call<ProviderInfo>(`/api/assistant/providers/${provider}`, { method: "PUT", body: json(body) }),

@@ -201,6 +201,16 @@ export type OAuthSignInInput = {
   password?: string;
 };
 
+export type IntegrationSnippet = { target: string; language: string; install: string; code: string; env: Record<string, string> };
+export type ReadinessFinding = { level: "spec" | "advice"; code: string; message: string; path: string; spec_ref: string | null };
+export type IntegrationGuide = {
+  agent_id: string;
+  agent: string;
+  card_url: string;
+  snippets: Record<string, IntegrationSnippet>;
+  guidance: string[];
+  readiness: ReadinessFinding[];
+};
 export type ProviderInfo = {
   provider: "anthropic" | "openai" | "gemini";
   configured: boolean;

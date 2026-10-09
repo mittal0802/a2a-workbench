@@ -56,3 +56,12 @@ async def test_mcp_assist_returns_steps_and_final_text(zoo):
             )
             follow = await call(c, "assist", {"goal": "echo more", "session_id": out["session_id"]})
             assert follow["final_text"] == "Done: echo more"
+
+
+async def test_mcp_integration_guide(zoo):
+    async with connected() as c:
+        out = await call(c, "integration_guide", {"agent": zoo.base_url, "target": "openai"})
+        assert "function_tool" in out["code"] and out["install"] and out["guidance"]
+        assert isinstance(out["readiness"], list) and "env" in out
+        full = await call(c, "integration_guide", {"agent": zoo.base_url})
+        assert set(full["snippets"]) == {"sdk", "adk", "langgraph", "openai", "claude"}
