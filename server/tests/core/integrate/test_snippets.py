@@ -92,3 +92,23 @@ async def test_oauth_client_credentials_snippet_uses_the_card_token_url(wb):
     assert f"{idp.idp.issuer}/token" in snippet.code
     assert "client_credentials" in snippet.code and "A2A_OAUTH_CLIENT_SECRET" in snippet.env
     ast.parse(snippet.code)
+
+
+@pytest.mark.parametrize("target", TARGETS)
+async def test_hostile_card_cannot_inject_code(wb, zoo, target):
+    from a2a.types import OpenIdConnectSecurityScheme, SecurityRequirement, SecurityScheme, StringList
+
+    card = card_from_json((await wb.agents.add(zoo.base_url)).card)
+    card.name = 'Evil"""\nimport os; os.system("echo PWNED")\n"""'
+    card.description = 'ends with a quote "'
+    card.skills[0].description = 'x"""; os.system("echo SKILL") ; """\\'
+    card.security_schemes["oidc"].CopyFrom(SecurityScheme(open_id_connect_security_scheme=OpenIdConnectSecurityScheme(
+        open_id_connect_url="https://idp/\n    os.system('echo PWNED2')\n    #")))
+    del card.security_requirements[:]
+    card.security_requirements.append(SecurityRequirement(schemes={"oidc": StringList(list=["a\nos.system('x')"])}))
+    snippet = render(card, 'http://z/"""\nos.system("u")\n"""', target)
+    tree = ast.parse(snippet.code)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "system"]
+    assert calls == []
+    assert not any(isinstance(n, ast.Import) and any(a.name == "os" for a in n.names) and n.col_offset > 0
+                   for n in ast.walk(tree))

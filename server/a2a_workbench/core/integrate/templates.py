@@ -47,6 +47,17 @@ class Snippet(BaseModel):
     env: dict[str, str]
 
 
+def _comment(text: str) -> str:
+    """Card text made safe for a ``#`` comment: one line, control characters removed."""
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())
+
+
+def _doc(text: str) -> str:
+    """Card text made safe inside a triple-quoted docstring: backslashes and quotes escaped."""
+    clean = "".join(c if c.isprintable() or c == "\n" else " " for c in text)
+    return clean.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _env_prefix(scheme: str) -> str:
     return "A2A_" + re.sub(r"[^A-Za-z0-9]+", "_", scheme).strip("_").upper()
 
@@ -132,14 +143,14 @@ def _auth_code(card: AgentCard) -> tuple[str, dict[str, str]]:
                 }.get(flow or "", "the scheme's OAuth flow")
                 env[var] = f"OAuth access token for scheme '{name}', obtained with {where}"
                 lines.append(
-                    f"    # Obtain the token with {where}; scopes: {' '.join(scopes) or 'none'}."
+                    f"    # Obtain the token with {where}; scopes: {_comment(' '.join(scopes)) or 'none'}."
                 )
                 lines.append(f'    headers["Authorization"] = f"Bearer {{os.environ[{var!r}]}}"')
         elif kind == "open_id_connect_security_scheme":
             var = f"{prefix}_ACCESS_TOKEN"
             env[var] = f"OpenID Connect access token for scheme '{name}'"
             url = scheme.open_id_connect_security_scheme.open_id_connect_url
-            lines.append(f"    # Sign in with OpenID Connect ({url}) and pass the access token.")
+            lines.append(f"    # Sign in with OpenID Connect ({_comment(url)}) and pass the access token.")
             lines.append(f'    headers["Authorization"] = f"Bearer {{os.environ[{var!r}]}}"')
         elif kind == "mtls_security_scheme":
             env[f"{prefix}_CERT"] = f"Client certificate PEM path for scheme '{name}'"
@@ -463,9 +474,9 @@ def render(card: AgentCard, card_url: str, target: Target) -> Snippet:
         else ""
     )
     code = (
-        _CORE.replace("__NAME__", card.name)
+        _CORE.replace("__NAME__", _doc(_comment(card.name)))
         .replace("__CARD_URL_LITERAL__", json.dumps(card_url))
-        .replace("__CARD_URL__", card_url)
+        .replace("__CARD_URL__", _doc(_comment(card_url)))
         .replace("__INSTALL__", _INSTALL[target])
         .replace("__AUTH__", auth)
         .replace("__BINDINGS__", json.dumps(bindings))
@@ -481,11 +492,11 @@ def render(card: AgentCard, card_url: str, target: Target) -> Snippet:
     ident = _ident(card.name)
     description = describe_agent(card)
     code += (
-        extra.replace("__NAME__", card.name)
+        extra.replace("__NAME__", _doc(_comment(card.name)))
         .replace("__IDENT_LITERAL__", json.dumps(ident))
         .replace("__IDENT__", ident)
         .replace("__DESCRIPTION__", json.dumps(description))
-        .replace("__TOOL_DOC__", description.replace("\\", "\\\\").replace('"""', '\\"\\"\\"'))
+        .replace("__TOOL_DOC__", _doc(description))
         .replace("__INSTRUCTIONS__", json.dumps(ORCHESTRATOR_INSTRUCTIONS))
         .replace("__ALLOWED__", json.dumps(f"mcp__a2a__{ident}"))
     )
