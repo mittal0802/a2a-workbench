@@ -217,6 +217,25 @@ class ConversationService:
             raise ConversationNotFoundError(f"conversation {conversation_id} not found")
         return _out(conv)
 
+    async def record_push(
+        self,
+        conversation_id: str,
+        data: dict[str, Any],
+        *,
+        task_id: str | None = None,
+        context_id: str | None = None,
+    ) -> TimelineEvent:
+        """Append a ``push`` event (a webhook delivery from the agent) to the conversation."""
+        return await self._emit(
+            TimelineEvent(
+                conversation_id=conversation_id,
+                kind="push",
+                task_id=task_id,
+                context_id=context_id,
+                data=data,
+            )
+        )
+
     async def delete(self, conversation_id: str) -> None:
         """Delete a conversation with its timeline events and recorded exchanges.
 

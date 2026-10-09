@@ -14,6 +14,8 @@ from a2a_workbench.core.config import Settings
 from a2a_workbench.core.conversations.service import ConversationService
 from a2a_workbench.core.exchanges import ExchangeStore
 from a2a_workbench.core.integrate.service import IntegrationService
+from a2a_workbench.core.push.hooks import HookStore
+from a2a_workbench.core.push.receiver import Receiver
 from a2a_workbench.core.push.service import PushService
 from a2a_workbench.core.registry.service import AgentService
 from a2a_workbench.core.store.db import Database
@@ -40,8 +42,22 @@ class Workbench:
         )
         self.tasks = TaskService(self.agents, self.exchanges, self.auth)
         self.push = PushService(self.tasks)
+        self.tunnel_url: str | None = None
+        self.hooks = HookStore(self.db, self.public_base_url)
+        self.receiver = Receiver(self.db, self.hooks, self.conversations, self.bus)
         self.assistant = AssistantService(self)
         self.integrate = IntegrationService(self.agents)
+
+    def public_base_url(self) -> str:
+        """Base URL agents reach this server at: the setting, a tunnel, or the bind address."""
+        if self.settings.public_base_url:
+            return self.settings.public_base_url.rstrip("/")
+        if self.tunnel_url:
+            return self.tunnel_url.rstrip("/")
+        host = (
+            self.settings.host if self.settings.host not in ("0.0.0.0", "::", "") else "127.0.0.1"
+        )
+        return f"http://{host}:{self.settings.port}"
 
     async def start(self) -> None:
         """Create the state directory, the schema and the default workspace."""

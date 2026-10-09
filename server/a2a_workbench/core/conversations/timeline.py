@@ -18,6 +18,7 @@ EventKind = Literal[
     "error",
     "connection_lost",
     "recovered",
+    "push",
 ]
 
 
