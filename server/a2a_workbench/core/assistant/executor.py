@@ -65,7 +65,10 @@ def _texts(message: dict[str, Any] | None) -> list[str]:
 def summarize_part(part: dict[str, Any]) -> dict[str, Any]:
     """Return a compact description of an A2A part (as JSON): text, data or file."""
     if "text" in part:
-        return {"kind": "text", "text": part["text"]}
+        out = {"kind": "text", "text": part["text"]}
+        if part.get("mediaType"):
+            out["media_type"] = part["mediaType"]
+        return out
     if "data" in part:
         return {"kind": "data", "data": part["data"]}
     out: dict[str, Any] = {"kind": "file"}

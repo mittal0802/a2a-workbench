@@ -4,7 +4,7 @@ import { Avatar } from "../../components/Avatar";
 import { JsonView } from "../../components/JsonView";
 import { stateLabel, toneClass } from "../../lib/labels";
 import type { AssistantStep } from "../../lib/types";
-import { Markdown } from "../chat/PartView";
+import { HtmlFrame, Markdown } from "../chat/PartView";
 import type { OutPart } from "./timeline";
 
 function seconds(a?: AssistantStep, b?: AssistantStep): string {
@@ -17,7 +17,9 @@ export function OutParts({ parts }: { parts: OutPart[] }) {
   return (
     <>
       {parts.map((p, i) =>
-        p.kind === "text" ? (
+        p.kind === "text" && p.media_type === "text/html" ? (
+          <HtmlFrame key={i} html={p.text ?? ""} />
+        ) : p.kind === "text" ? (
           <Markdown key={i} text={p.text ?? ""} />
         ) : p.kind === "data" ? (
           <JsonView key={i} value={p.data} />

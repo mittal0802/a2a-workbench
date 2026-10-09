@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { PartView } from "./PartView";
@@ -46,5 +47,30 @@ describe("PartView", () => {
   it("keeps a declared non-markdown text type plain even when markdown is on", () => {
     const { container } = render(<PartView part={{ text: "**x**", mediaType: "text/csv" }} markdown />);
     expect(container.querySelector("strong")).toBeNull();
+  });
+  it("renders safe HTML inside markdown and strips scripts and handlers", () => {
+    const { container } = render(
+      <PartView
+        markdown
+        part={{ text: 'Hi <b>there</b><table><tbody><tr><td>cell</td></tr></tbody></table><img src="x" onerror="alert(1)"><script>alert(2)</script><a href="javascript:alert(3)">bad</a><iframe src="https://e.com"></iframe>' }}
+      />,
+    );
+    expect(container.querySelector("b")?.textContent).toBe("there");
+    expect(container.querySelector("td")?.textContent).toBe("cell");
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector("img")?.getAttribute("onerror")).toBeNull();
+    expect(container.querySelector("a")?.getAttribute("href") ?? "").not.toMatch(/javascript/i);
+  });
+
+  it("renders text/html parts in a sandboxed frame without scripts or same-origin access", async () => {
+    const { container } = render(<PartView part={{ text: "<h1>Report</h1><script>x()</script>", mediaType: "text/html" }} markdown />);
+    const frame = container.querySelector("iframe") as HTMLIFrameElement;
+    expect(frame).not.toBeNull();
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("<h1>Report</h1>");
+    expect(frame.getAttribute("srcdoc")).toContain("default-src 'none'");
+    await userEvent.click(screen.getByRole("button", { name: /view source/i }));
+    expect(screen.getByText(/<h1>Report<\/h1>/)).toBeInTheDocument();
   });
 });

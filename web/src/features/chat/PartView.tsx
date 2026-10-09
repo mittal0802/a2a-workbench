@@ -1,4 +1,7 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { JsonView } from "../../components/JsonView";
 import { base64Size, dataUrl, formatBytes, partKind } from "../../lib/parts";
@@ -7,12 +10,37 @@ import type { A2APart } from "../../lib/types";
 const SAFE_URL = /^https?:\/\//i;
 const MARKDOWN_TYPES = new Set(["", "text/plain", "text/markdown"]);
 
-/** Markdown for agent text: GitHub-flavoured, raw HTML not rendered, links open in a new tab. */
+const FRAME_CSP =
+  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; font-src https: data:\">";
+
+/** An agent's HTML document, isolated: sandboxed frame (no scripts, no same-origin), with its source viewable. */
+export function HtmlFrame({ html }: { html: string }) {
+  const [source, setSource] = useState(false);
+  return (
+    <div className="htmlpart">
+      <div className="htmlpart-h">
+        <span className="no">HTML · scripts disabled</span>
+        <span className="spacer" />
+        <button type="button" className="ib" onClick={() => setSource(!source)}>
+          {source ? "View rendered" : "View source"}
+        </button>
+      </div>
+      {source ? (
+        <pre className="code">{html}</pre>
+      ) : (
+        <iframe title="HTML from the agent" sandbox="" srcDoc={FRAME_CSP + html} className="htmlframe" />
+      )}
+    </div>
+  );
+}
+
+/** Markdown for agent text: GitHub-flavoured, embedded HTML sanitized (no scripts or handlers), links open in a new tab. */
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw, rehypeSanitize]}
         components={{
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer noopener">
@@ -39,7 +67,9 @@ export function PartView({ part, markdown = false }: { part: A2APart; markdown?:
   let body;
   if (kind === "text") {
     body =
-      media === "text/markdown" || (markdown && MARKDOWN_TYPES.has(media)) ? (
+      media === "text/html" ? (
+        <HtmlFrame html={part.text ?? ""} />
+      ) : media === "text/markdown" || (markdown && MARKDOWN_TYPES.has(media)) ? (
         <Markdown text={part.text ?? ""} />
       ) : (
         <div className="whitespace-pre-wrap">{part.text}</div>
