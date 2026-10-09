@@ -407,7 +407,8 @@ class AuthService:
                 if current is None:
                     continue
                 current = {"kind": "oauth2", **current}
-                if not self._needs_renewal(current):
+                renewed_meanwhile = current.get("access_token") != cred.get("access_token")
+                if renewed_meanwhile or not self._needs_renewal(current):
                     credentials[name] = current
                     continue
                 renewed = await self._renew(agent_id, name, current)
@@ -675,7 +676,7 @@ class AuthService:
         for s in schemes:
             s.credential = infos.get(s.name)
         status: Literal["not_required", "signed_in", "sign_in_needed"]
-        if not alternatives:
+        if not alternatives or (any(not a for a in alternatives) and not plan.scheme_names):
             status = "not_required"
         elif plan.missing or not plan.scheme_names or set(expired) & set(plan.scheme_names):
             status = "sign_in_needed"

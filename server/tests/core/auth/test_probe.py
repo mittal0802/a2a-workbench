@@ -56,3 +56,24 @@ async def test_probe_on_open_agent_is_not_applicable(wb, zoo):
     agent = await wb.agents.add(zoo.base_url)
     results = await wb.auth.probe(agent.id, card_from_json(agent.card))
     assert [r.outcome for r in results] == ["not_applicable"]
+
+
+async def test_card_allowing_anonymous_access_is_not_a_failure(wb):
+    from a2a.types import HTTPAuthSecurityScheme, SecurityRequirement, SecurityScheme, StringList
+
+    async with ZooServer(auth="none", grpc=False) as zoo:
+        agent = await wb.agents.add(zoo.base_url)
+        card = card_from_json(agent.card)
+        card.security_schemes["bearer"].CopyFrom(
+            SecurityScheme(http_auth_security_scheme=HTTPAuthSecurityScheme(scheme="Bearer"))
+        )
+        card.security_requirements.append(SecurityRequirement())
+        card.security_requirements.append(SecurityRequirement(schemes={"bearer": StringList()}))
+        results = {r.check: r for r in await wb.auth.probe(agent.id, card)}
+        overview = await wb.auth.overview(agent.id, card)
+    assert results["rejects_anonymous"].outcome == "not_applicable"
+    assert "without signing in" in results["rejects_anonymous"].detail
+    assert results["rejects_wrong_credentials"].outcome == "not_applicable"
+    assert all(r.outcome != "fail" for r in results.values())
+    assert all(r.spec_ref.startswith("A2A §7.4") for r in results.values())
+    assert overview.status == "not_required"

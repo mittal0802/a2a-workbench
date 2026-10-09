@@ -25,7 +25,7 @@ class ProbeResult(BaseModel):
     title: str
     outcome: Outcome
     detail: str
-    spec_ref: str = "A2A §4 Authentication"
+    spec_ref: str = "A2A §7.4 Server Authentication Responsibilities"
 
 
 async def _attempt(
@@ -80,6 +80,27 @@ async def probe_enforcement(
             )
         ]
     results: list[ProbeResult] = []
+    if any(not alternative for alternative in alternatives):
+        open_detail = (
+            "The card lets callers use the agent without signing in (an empty security "
+            "requirement), so accepting such calls is allowed."
+        )
+        results += [
+            ProbeResult(
+                check="rejects_anonymous",
+                title="Blocks requests without sign-in",
+                outcome="not_applicable",
+                detail=open_detail,
+            ),
+            ProbeResult(
+                check="rejects_wrong_credentials",
+                title="Blocks wrong credentials",
+                outcome="not_applicable",
+                detail=open_detail,
+            ),
+        ]
+        results.append(await _accepts_yours(card, credentials, sink, interface_url))
+        return results
     anonymous = await _attempt(card, interface_url, sink, AuthPlan(), "anonymous")
     results.append(
         ProbeResult(
@@ -137,27 +158,32 @@ async def probe_enforcement(
                 detail="Wrong client certificates are not probed.",
             )
         )
-    plan = build_auth_plan(card, credentials)
-    if not plan.scheme_names:
-        results.append(
-            ProbeResult(
-                check="accepts_your_credentials",
-                title="Accepts your sign-in",
-                outcome="skipped",
-                detail="Sign in first to check this.",
-            )
-        )
-    else:
-        mine = await _attempt(card, interface_url, sink, plan, "your_credentials")
-        results.append(
-            ProbeResult(
-                check="accepts_your_credentials",
-                title="Accepts your sign-in",
-                outcome="pass" if mine == "accepted" else "fail" if mine == "rejected" else "error",
-                detail={
-                    "accepted": "Your credentials were accepted.",
-                    "rejected": "The agent rejected your saved credentials.",
-                }.get(mine, mine),
-            )
-        )
+    results.append(await _accepts_yours(card, credentials, sink, interface_url))
     return results
+
+
+async def _accepts_yours(
+    card: AgentCard, credentials: dict[str, dict[str, Any]], sink: Any, interface_url: str | None
+) -> ProbeResult:
+    signed = AgentCard()
+    signed.CopyFrom(card)
+    del signed.security_requirements[:]
+    signed.security_requirements.extend(r for r in card.security_requirements if r.schemes)
+    plan = build_auth_plan(signed, credentials)
+    if not plan.scheme_names:
+        return ProbeResult(
+            check="accepts_your_credentials",
+            title="Accepts your sign-in",
+            outcome="skipped",
+            detail="Sign in first to check this.",
+        )
+    mine = await _attempt(card, interface_url, sink, plan, "your_credentials")
+    return ProbeResult(
+        check="accepts_your_credentials",
+        title="Accepts your sign-in",
+        outcome="pass" if mine == "accepted" else "fail" if mine == "rejected" else "error",
+        detail={
+            "accepted": "Your credentials were accepted.",
+            "rejected": "The agent rejected your saved credentials.",
+        }.get(mine, mine),
+    )
