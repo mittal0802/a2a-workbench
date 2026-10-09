@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Avatar } from "../../components/Avatar";
 import { api } from "../../lib/api";
 import { AboutView } from "../about/AboutView";
@@ -8,12 +8,15 @@ import { ChatView } from "../chat/ChatView";
 import { InspectDrawer } from "../inspect/InspectDrawer";
 import { SecurityView } from "../security/SecurityView";
 import { TasksView } from "../tasks/TasksView";
+import { IntegrateView } from "../integrate/IntegrateView";
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
   { id: "chat", label: "Chat" },
   { id: "tasks", label: "Tasks" },
   { id: "security", label: "Security" },
+  { id: "integrate", label: "Integrate" },
   { id: "about", label: "About" },
 ] as const;
 
@@ -25,13 +28,14 @@ export function AgentPage() {
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => api.getAgent(agentId) });
   const security = useQuery({ queryKey: ["security", agentId], queryFn: () => api.security(agentId) });
   const [prefill, setPrefill] = useState<string | undefined>();
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const [conversationId, setConversationId] = useState<string | null>(params.get("conversation"));
   const [inspecting, setInspecting] = useState(false);
   const [focusExchange, setFocusExchange] = useState<string | undefined>();
   const [shownAgent, setShownAgent] = useState(agentId);
   if (shownAgent !== agentId) {
     setShownAgent(agentId);
-    setConversationId(null);
+    setConversationId(params.get("conversation"));
     setPrefill(undefined);
   }
   const changeConversation = useCallback((id: string | null) => setConversationId(id), []);
@@ -115,6 +119,11 @@ export function AgentPage() {
             <SecurityView agentId={a.id} />
           </section>
         )}
+        {tab === "integrate" && (
+          <section className="view on">
+            <IntegrateView agentId={a.id} />
+          </section>
+        )}
         <section className={`view ${tab === "about" ? "on" : ""}`}>
           <AboutView
             agent={a}
@@ -123,6 +132,30 @@ export function AgentPage() {
               navigate(`/agents/${a.id}/chat`);
             }}
           />
+          <div className="card" style={{ margin: "0 24px 24px", maxWidth: 940 }}>
+            <div className="card-b" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <b>Remove this agent</b>
+                <div className="no" style={{ fontSize: 12.5 }}>
+                  Deletes its conversations, recorded traffic and saved credentials from the Workbench. The agent itself is not affected.
+                </div>
+              </div>
+              <ConfirmButton
+                label="Remove agent"
+                question={`Remove ${a.name}?`}
+                confirmLabel="Remove"
+                className="btn ghost"
+                onConfirm={() =>
+                  api.deleteAgent(a.id).then(() => {
+                    qc.invalidateQueries({ queryKey: ["agents"] });
+                    navigate("/");
+                  })
+                }
+              >
+                Remove agent
+              </ConfirmButton>
+            </div>
+          </div>
         </section>
       </div>
     </>

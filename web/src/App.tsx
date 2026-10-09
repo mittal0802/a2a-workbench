@@ -3,6 +3,8 @@ import { useState } from "react";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router";
 import { ConnectDialog } from "./components/ConnectDialog";
 import { Sidebar } from "./components/Sidebar";
+import { AssistantPage } from "./features/assistant/AssistantPage";
+import { SettingsPage } from "./features/settings/SettingsPage";
 import { AgentPage } from "./features/agent/AgentPage";
 
 function Home({ onConnect }: { onConnect: () => void }) {
@@ -33,6 +35,8 @@ function Shell() {
         <Routes>
           <Route path="/" element={<Home onConnect={open} />} />
           <Route path="/agents/:agentId/:tab?" element={<AgentPage />} />
+          <Route path="/assistant/:sessionId?" element={<AssistantPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
       <ConnectDialog

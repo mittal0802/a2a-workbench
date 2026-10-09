@@ -40,6 +40,10 @@ faults_app = typer.Typer(no_args_is_help=True, help="Fault profiles for failure 
 app.add_typer(faults_app, name="faults")
 auth_app = typer.Typer(no_args_is_help=True, help="Sign in to agents and check enforcement.")
 app.add_typer(auth_app, name="auth")
+providers_app = typer.Typer(no_args_is_help=True, help="API keys of the Assistant's LLM providers.")
+app.add_typer(providers_app, name="providers")
+chats_app = typer.Typer(no_args_is_help=True, help="Assistant chats: list, raw LLM calls, delete.")
+app.add_typer(chats_app, name="chats")
 
 FaultsOpt = Annotated[
     str | None,
@@ -359,9 +363,24 @@ def fixtures(
         int | None,
         typer.Option(help="Mock identity provider port for oauth/oidc (default: HTTP port + 3)."),
     ] = None,
+    llm: Annotated[
+        bool,
+        typer.Option(
+            "--llm", help="Serve the scripted test LLM (OpenAI-compatible) instead of an agent."
+        ),
+    ] = False,
 ) -> None:
-    """Run the zoo reference agent until interrupted."""
+    """Run the zoo reference agent (or, with --llm, the scripted test LLM) until interrupted."""
     import uvicorn
+
+    if llm:
+        from a2a_workbench.fixtures.llm import build_fake_openai_app
+
+        typer.echo(
+            f"Scripted test LLM at http://{host}:{port}/v1 (provider openai, any API key)", err=True
+        )
+        uvicorn.run(build_fake_openai_app([]), host=host, port=port)
+        return
 
     from a2a_workbench.fixtures.zoo import build_zoo_app
 
@@ -880,6 +899,277 @@ def auth_probe(
             typer.echo(f"{r.outcome:<15} {r.title} — {r.detail}")
     if any(r.outcome == "fail" for r in results):
         raise typer.Exit(ExitCode.CHECKS_FAILED)
+
+
+def _step_line(step: Any) -> str | None:
+    d = step.data
+    if step.kind == "tool_call":
+        target = d.get("agent") or d.get("tool")
+        return f"→ {target}: {json.dumps(d.get('arguments', {}), ensure_ascii=False)}"
+    if step.kind == "rejected_call":
+        return f"✕ rejected ({d.get('rule')}): {d.get('message')}"
+    if step.kind == "tool_result":
+        who = f" · answered by {d['answered_by']}" if d.get("answered_by") else ""
+        return f"← {d.get('agent')}: {d.get('state') or d.get('kind')}{who}"
+    if step.kind == "agent_output":
+        text = "".join(p.get("text", "") for p in d.get("parts", []))
+        return f"  {d.get('agent')}: {text}" if text else None
+    if step.kind == "paused":
+        return f"⏸ {d.get('agent')} needs you ({d.get('reason')}): {d.get('question') or ''}"
+    if step.kind in ("assistant", "done"):
+        return f"Assistant: {d['text']}" if d.get("text") and step.kind == "done" else None
+    if step.kind in ("limit", "error"):
+        return f"! {d.get('limit') or d.get('category')}: {d.get('message') or d.get('value')}"
+    return None
+
+
+@app.command()
+def assist(
+    goal: Annotated[
+        str, typer.Argument(help="What you want done (or your reply, with --session).")
+    ],
+    agents: Annotated[
+        str | None, typer.Option(help="Comma-separated agents (names, ids or URLs) it may call.")
+    ] = None,
+    provider: Annotated[str, typer.Option(help="anthropic, openai or gemini.")] = "anthropic",
+    model: Annotated[str | None, typer.Option(help="Model name (Anthropic has a default).")] = None,
+    response_mode: Annotated[
+        str | None,
+        typer.Option(
+            help="rewrite (the Assistant answers) or pass-through (agents speak directly); "
+            "default rewrite for a new chat, unchanged with --session."
+        ),
+    ] = None,
+    session: Annotated[str | None, typer.Option(help="Continue this Assistant chat.")] = None,
+    max_steps: Annotated[int, typer.Option(min=1, help="Model turns per message.")] = 12,
+    call_timeout: Annotated[float, typer.Option(help="Seconds per agent call.")] = 120,
+    as_json: JsonFlag = False,
+) -> None:
+    """Let an LLM call your A2A agents as tools; print each step (NDJSON with --json).
+
+    Exit codes: 0 done or waiting for your reply, 1 a limit was reached, 4 sign-in
+    needed or no API key, 6 other errors.
+    """
+    from a2a_workbench.core.assistant.service import Limits, SessionIn
+
+    mode = (response_mode or "rewrite").replace("-", "_")
+    if mode not in ("rewrite", "pass_through"):
+        _fail("workbench", "response mode is rewrite or pass-through", as_json, ExitCode.USAGE)
+    if not session and not agents:
+        _fail("workbench", "give --agents (or --session to continue)", as_json, ExitCode.USAGE)
+
+    async def go() -> tuple[Any, list[Any]]:
+        async with Workbench.open(Settings()) as wb:
+            sid = session
+            if sid is None:
+                ids = [
+                    (await _resolve_or_register(wb, a.strip(), as_json)).id
+                    for a in (agents or "").split(",")
+                    if a.strip()
+                ]
+                try:
+                    created = await wb.assistant.create(
+                        SessionIn(
+                            provider=provider,
+                            model=model,
+                            response_mode=mode,  # type: ignore[arg-type]
+                            agent_ids=ids,
+                            limits=Limits(max_steps=max_steps, call_timeout_s=call_timeout),
+                            title=goal[:80],
+                        )
+                    )
+                except ValueError as exc:
+                    _fail("workbench", str(exc), as_json, ExitCode.USAGE)
+                sid = created.id
+            elif response_mode is not None:
+                await wb.assistant.update(sid, response_mode=mode)  # type: ignore[arg-type]
+            steps = []
+            async for step in wb.assistant.send(sid, goal):
+                steps.append(step)
+                if as_json:
+                    print_json(step.model_dump(mode="json"))
+                elif (line := _step_line(step)) is not None:
+                    typer.echo(line)
+            return await wb.assistant.get(sid), steps
+
+    final, steps = _run(go())
+    if as_json:
+        print_json({"session": final.model_dump(mode="json")})
+    else:
+        typer.echo(f"(session {final.id} · {final.status})", err=True)
+    last = steps[-1] if steps else None
+    if final.status == "awaiting_sign_in":
+        raise typer.Exit(ExitCode.AUTH)
+    if last is not None and last.kind == "limit" and last.data.get("limit") != "stopped":
+        raise typer.Exit(ExitCode.CHECKS_FAILED)
+    if last is not None and last.kind == "error":
+        raise typer.Exit(
+            ExitCode.AUTH if last.data.get("category") == "auth" else ExitCode.INTERNAL
+        )
+
+
+@providers_app.command("list")
+def providers_list(as_json: JsonFlag = False) -> None:
+    """Show which providers have a key (stored or from the environment), masked."""
+
+    async def go() -> list[Any]:
+        async with Workbench.open(Settings()) as wb:
+            return await wb.provider_keys.list()
+
+    infos = _run(go())
+    if as_json:
+        print_json([i.model_dump(mode="json") for i in infos])
+        return
+    for i in infos:
+        where = f"{i.source} {i.preview}" if i.configured else "not set"
+        url = f" · {i.base_url}" if i.base_url else ""
+        typer.echo(f"{i.provider:<10} {where}{url}")
+
+
+@providers_app.command("set")
+def providers_set(
+    provider: Annotated[str, typer.Argument(help="anthropic, openai or gemini.")],
+    api_key: Annotated[
+        str | None,
+        typer.Option(envvar="A2AW_LLM_API_KEY", help="The API key ('-' reads stdin)."),
+    ] = None,
+    base_url: Annotated[
+        str | None, typer.Option(help="OpenAI-compatible server URL (Ollama, vLLM, LM Studio…).")
+    ] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Store a provider's API key, encrypted (never echoed)."""
+    key = _secret(api_key)
+    if not key:
+        _fail(
+            "workbench",
+            "give the key with A2AW_LLM_API_KEY or --api-key -",
+            as_json,
+            ExitCode.USAGE,
+        )
+
+    async def go() -> Any:
+        async with Workbench.open(Settings()) as wb:
+            try:
+                return await wb.provider_keys.put(provider, key or "", base_url)
+            except ValueError as exc:
+                _fail("workbench", str(exc), as_json, ExitCode.USAGE)
+
+    info = _run(go())
+    print_json(info.model_dump(mode="json")) if as_json else typer.echo(
+        f"Saved {provider} key {info.preview}"
+    )
+
+
+@providers_app.command("remove")
+def providers_remove(provider: Annotated[str, typer.Argument()]) -> None:
+    """Delete a provider's stored key."""
+
+    async def go() -> None:
+        async with Workbench.open(Settings()) as wb:
+            await wb.provider_keys.delete(provider)
+
+    _run(go())
+    typer.echo(f"Removed {provider} key")
+
+
+@app.command()
+def integrate(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    code_for: Annotated[
+        str, typer.Option("--target", help="sdk, adk, langgraph, openai or claude.")
+    ] = "sdk",
+    as_json: JsonFlag = False,
+) -> None:
+    """Print code for calling the agent from your own agent, plus readiness advice.
+
+    With --json, prints the whole guide (every target, guidance, readiness).
+    """
+    from a2a_workbench.core.integrate.templates import TARGETS
+
+    if code_for not in TARGETS:
+        _fail("workbench", f"--target is one of {', '.join(TARGETS)}", as_json, ExitCode.USAGE)
+
+    async def go() -> Any:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            return await wb.integrate.guide(agent.id)
+
+    guide = _run(go())
+    if as_json:
+        print_json(guide.model_dump(mode="json"))
+        return
+    snippet = guide.snippets[code_for]
+    typer.echo(snippet.code)
+    typer.echo(f"# Install: {snippet.install}", err=True)
+    for name, meaning in snippet.env.items():
+        typer.echo(f"# {name}: {meaning}", err=True)
+    for f in guide.readiness:
+        typer.echo(f"# {f.level}: {f.message} ({f.path})", err=True)
+
+
+@chats_app.command("list")
+def chats_list(as_json: JsonFlag = False) -> None:
+    """List Assistant chats, newest first."""
+
+    async def go() -> list[Any]:
+        async with Workbench.open(Settings()) as wb:
+            return await wb.assistant.list()
+
+    chats = _run(go())
+    if as_json:
+        print_json([c.model_dump(mode="json") for c in chats])
+        return
+    for c in chats:
+        typer.echo(f"{c.id}  {c.status:<16} {c.provider}/{c.model}  {c.title}")
+
+
+@chats_app.command("calls")
+def chats_calls(
+    session: Annotated[str, typer.Argument(help="Assistant chat id.")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Show the raw HTTP calls made to the LLM provider in a chat (keys masked)."""
+
+    async def go() -> list[Any]:
+        async with Workbench.open(Settings()) as wb:
+            calls = await wb.exchanges.list(conversation_id=session)
+            return [await wb.exchanges.get(c["id"]) for c in calls if c["operation"] == "llm_call"]
+
+    calls = _run(go())
+    if as_json:
+        print_json(calls)
+        return
+    for c in calls:
+        typer.echo(
+            f"{c['started_at']}  {c['http_method']} {c['url']} → {c['status']}"
+            f" · {c['duration_ms']} ms"
+        )
+
+
+@chats_app.command("delete")
+def chats_delete(
+    chat_id: Annotated[str, typer.Argument(help="Assistant chat id or agent conversation id.")],
+) -> None:
+    """Delete an Assistant chat (with its steps and LLM calls) or an agent conversation."""
+    from a2a_workbench.core.assistant.service import SessionNotFoundError
+    from a2a_workbench.core.conversations.service import ConversationNotFoundError
+
+    async def go() -> str:
+        async with Workbench.open(Settings()) as wb:
+            try:
+                await wb.assistant.delete(chat_id)
+                return "Assistant chat"
+            except SessionNotFoundError:
+                pass
+            try:
+                await wb.conversations.delete(chat_id)
+                return "conversation"
+            except ConversationNotFoundError:
+                _fail("workbench", f"no chat or conversation {chat_id}", False, ExitCode.USAGE)
+
+    kind = _run(go())
+    typer.echo(f"Deleted {kind} {chat_id}")
 
 
 def main() -> None:

@@ -34,7 +34,9 @@ see exact wire traffic. Use faults="flaky_stream" (see fault_presets) to drop
 a stream, then resubscribe(conversation_id) and read the "recovered" event's
 gap analysis. An "auth" error means the agent needs sign-in: auth_status(agent)
 lists its schemes, then set_credential or sign_in; auth_probe checks the agent
-really enforces what it declares. Errors come back as {"error": {...}} with a
+really enforces what it declares. assist(goal, agents) runs an orchestrator
+LLM that calls agents the way the A2A spec defines a client agent; its steps
+show every call and rejected call. Errors come back as {"error": {...}} with a
 category.
 """
 
@@ -447,6 +449,117 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
             return {"results": [r.model_dump() for r in results]}
         except Exception as exc:
             return _error(exc)
+
+    @server.tool()
+    async def assistant_providers() -> dict[str, Any]:
+        """List the Assistant's LLM providers and whether each has a key (masked)."""
+        return {"providers": [p.model_dump(mode="json") for p in await wb.provider_keys.list()]}
+
+    @server.tool()
+    async def assist(
+        goal: str,
+        agents: list[str] | None = None,
+        provider: str = "anthropic",
+        model: str | None = None,
+        response_mode: str = "rewrite",
+        session_id: str | None = None,
+        timeout_s: float = 300,
+    ) -> dict[str, Any]:
+        """Let an orchestrator LLM call A2A agents as tools, following A2A client rules.
+
+        Give agents (URLs, ids or names) to start a chat, or session_id to
+        continue one (for example to answer an agent's question in
+        pass-through mode). response_mode is "rewrite" (the Assistant answers)
+        or "pass_through" (agents' output goes to the user verbatim). Each step
+        (tool_call, rejected_call, tool_result with conversation_id and ids,
+        agent_output, paused, limit, error, done) is returned; list_exchanges on
+        a step's conversation_id shows the wire traffic. Needs a provider key
+        (see assistant_providers).
+        """
+        from a2a_workbench.core.assistant.service import SessionIn
+
+        try:
+            sid = session_id
+            if sid is None:
+                ids = [(await resolve(a)).id for a in agents or []]
+                created = await wb.assistant.create(
+                    SessionIn(
+                        provider=provider,
+                        model=model,
+                        response_mode=response_mode,  # type: ignore[arg-type]
+                        agent_ids=ids,
+                        title=goal[:80],
+                    )
+                )
+                sid = created.id
+            steps: list[Any] = []
+            timed_out = False
+            try:
+                async with asyncio.timeout(timeout_s):
+                    async for step in wb.assistant.send(sid, goal):
+                        steps.append(step.model_dump(mode="json"))
+            except TimeoutError:
+                timed_out = True
+            session = await wb.assistant.get(sid)
+        except Exception as exc:
+            return _error(exc)
+        done = next((s for s in reversed(steps) if s["kind"] == "done"), None)
+        failed = next((s for s in reversed(steps) if s["kind"] == "error"), None)
+        return {
+            "session_id": sid,
+            "status": session.status,
+            "pending": session.pending,
+            "final_text": done["data"]["text"] if done else None,
+            "error": failed["data"] if failed else None,
+            "timed_out": timed_out,
+            "steps": steps,
+        }
+
+    @server.tool()
+    async def integration_guide(agent: str, target: str | None = None) -> dict[str, Any]:
+        """Code for calling an agent from your own agent, plus guidance and readiness.
+
+        target is sdk (plain a2a-sdk), adk, langgraph, openai (Agents SDK) or claude
+        (Agent SDK); with a target, returns its code, install line and env vars,
+        otherwise every snippet. The code follows the A2A client rules (ids,
+        follow-ups, resubscribe, artifacts as results, auth_required) and reads
+        secrets from environment variables.
+        """
+        try:
+            guide = await wb.integrate.guide((await resolve(agent)).id)
+        except Exception as exc:
+            return _error(exc)
+        body = guide.model_dump(mode="json")
+        if target is None:
+            return body
+        if target not in body["snippets"]:
+            return {"error": {"category": "workbench", "message": f"unknown target '{target}'"}}
+        snippet = body["snippets"][target]
+        return {
+            "agent": body["agent"],
+            "card_url": body["card_url"],
+            **snippet,
+            "guidance": body["guidance"],
+            "readiness": body["readiness"],
+        }
+
+    @server.tool()
+    async def delete_conversation(conversation_id: str) -> dict[str, Any]:
+        """Delete an agent conversation with its events and recorded exchanges."""
+        try:
+            await wb.conversations.delete(conversation_id)
+        except Exception as exc:
+            return _error(exc)
+        return {"deleted": conversation_id}
+
+    @server.tool()
+    async def delete_assistant_chat(session_id: str) -> dict[str, Any]:
+        """Delete an Assistant chat with its steps and recorded LLM calls."""
+        try:
+            await wb.assistant.delete(session_id)
+        except Exception as exc:
+            return _error(exc)
+        return {"deleted": session_id}
 
     @server.tool()
     async def fault_presets() -> dict[str, Any]:

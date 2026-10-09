@@ -10,7 +10,7 @@ export function AskCard({ message, state }: { message: A2AMessage | null; state:
         ● {auth ? "Sign-in needed" : "Waiting for you"}
       </div>
       {message?.parts.length ? (
-        message.parts.map((p, i) => <PartView key={i} part={p} />)
+        message.parts.map((p, i) => <PartView key={i} part={p} markdown />)
       ) : (
         <div className="no">{auth ? "The agent needs you to sign in." : "The agent needs more input."}</div>
       )}

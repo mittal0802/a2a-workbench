@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 
 from a2a_workbench.api.deps import get_workbench
+from a2a_workbench.core.integrate.service import IntegrationGuide
 from a2a_workbench.core.registry.service import AgentOut, CardPreview, ExtendedCardOut
 from a2a_workbench.core.workbench import Workbench
 
@@ -37,6 +38,11 @@ async def add_agent(body: UrlIn, wb: Workbench = Depends(get_workbench)) -> Agen
 @router.get("/agents/{agent_id}")
 async def get_agent(agent_id: str, wb: Workbench = Depends(get_workbench)) -> AgentOut:
     return await wb.agents.get(agent_id)
+
+
+@router.get("/agents/{agent_id}/integration")
+async def integration(agent_id: str, wb: Workbench = Depends(get_workbench)) -> IntegrationGuide:
+    return await wb.integrate.guide(agent_id)
 
 
 @router.patch("/agents/{agent_id}")

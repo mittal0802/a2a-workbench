@@ -31,6 +31,11 @@ class SendOptions(BaseModel):
     Never sent: A2A messages have no skill field, and the agent decides which
     skill handles a request.
     """
+    inherit_ids: bool = True
+    """Fill in the conversation's context id and open task id when the options omit them.
+
+    With False, the message carries exactly ``context_id`` and ``task_id`` as given.
+    """
 
 
 def build_request(message: Message, options: SendOptions) -> SendMessageRequest:

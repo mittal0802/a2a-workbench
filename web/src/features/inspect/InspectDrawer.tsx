@@ -10,6 +10,7 @@ const OPERATIONS: Record<string, string> = {
   get_agent_card: "Fetch agent card",
   send_message: "Send message",
   cancel_task: "Stop task",
+  llm_call: "LLM call",
 };
 
 /** Plain-language name of a recorded exchange. */

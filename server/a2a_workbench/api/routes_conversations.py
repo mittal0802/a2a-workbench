@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from a2a_workbench.api.deps import get_workbench
@@ -112,3 +112,11 @@ async def cancel(
     await wb.conversations.get(conversation_id)
     _spawn(request, wb.conversations.cancel(conversation_id))
     return {"accepted": True}
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: str, wb: Workbench = Depends(get_workbench)
+) -> Response:
+    await wb.conversations.delete(conversation_id)
+    return Response(status_code=204)

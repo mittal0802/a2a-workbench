@@ -19,6 +19,9 @@ dependencies = [
   "typer>=0.15",
   "httpx>=0.28.1",
   "mcp>=2.3,<3",
+  "anthropic>=1.12.1",
+  "openai>=3.26.1",
+  "google-genai>=2.29.0",
 ]
 
 [project.scripts]
@@ -52,3 +55,6 @@ ignore = ["B008", "RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+
+[tool.ruff.lint.per-file-ignores]
+"a2a_workbench/core/integrate/templates.py" = ["E501"]  # generated-code templates are kept verbatim

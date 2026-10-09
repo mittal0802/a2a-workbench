@@ -128,3 +128,47 @@ class Credential(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class ProviderKey(Base):
+    __tablename__ = "provider_key"
+    provider: Mapped[str] = mapped_column(String(30), primary_key=True)
+    encrypted: Mapped[bytes] = mapped_column(LargeBinary)
+    base_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class AssistantSession(Base):
+    __tablename__ = "assistant_session"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
+    title: Mapped[str] = mapped_column(String(200), default="New chat")
+    provider: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str] = mapped_column(String(200))
+    response_mode: Mapped[str] = mapped_column(String(20), default="rewrite")
+    agent_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    limits: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="idle")
+    transcript: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    ids: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    contexts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    pending: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    budget: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    last_seq: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class AssistantStepRow(Base):
+    __tablename__ = "assistant_step"
+    __table_args__ = (UniqueConstraint("session_id", "seq"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("assistant_session.id"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(30))
+    data: Mapped[dict[str, Any]] = mapped_column(JSON)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

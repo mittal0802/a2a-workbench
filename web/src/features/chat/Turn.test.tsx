@@ -88,4 +88,37 @@ describe("AgentBubble sign-in prompts", () => {
     await userEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(onContinue).toHaveBeenCalled();
   });
+  it("renders the agent's text as markdown and copies the raw text", async () => {
+    const user = userEvent.setup();
+    const turn = agentTurn([
+      ev(1, "message", { message: { parts: [{ text: "# Title\n\n**done**" }] } }),
+    ]);
+    const { container } = render(<AgentBubble turn={turn} agentName="Zoo" />);
+    expect(container.querySelector("h1")?.textContent).toBe("Title");
+    await user.click(screen.getByRole("button", { name: "Copy raw" }));
+    expect(await navigator.clipboard.readText()).toBe("# Title\n\n**done**");
+  });
+
+  it("copies the raw text of artifacts and status messages too", async () => {
+    const user = userEvent.setup();
+    const turn = agentTurn([
+      ev(1, "task", { state: "working", task: { id: "t" } }),
+      ev(2, "artifact", { append: false, last_chunk: true, artifact: {}, assembled: { artifactId: "a1", name: "r", parts: [{ text: "| a | b |\n|---|---|\n| 1 | 2 |" }] } }),
+      ev(3, "status", { state: "completed", status: { message: { parts: [{ text: "All _done_." }] } } }),
+    ]);
+    const { container } = render(<AgentBubble turn={turn} agentName="Zoo" />);
+    expect(container.querySelector("table")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Copy raw" }));
+    expect(await navigator.clipboard.readText()).toBe("| a | b |\n|---|---|\n| 1 | 2 |\n\nAll _done_.");
+  });
+  it("copies a streamed artifact as one text", async () => {
+    const user = userEvent.setup();
+    const turn = agentTurn([
+      ev(1, "task", { state: "working", task: { id: "t" } }),
+      ev(2, "artifact", { append: false, last_chunk: true, artifact: {}, assembled: { artifactId: "a1", parts: [{ text: "Stream" }, { text: "ing." }] } }),
+    ]);
+    render(<AgentBubble turn={turn} agentName="Zoo" />);
+    await user.click(screen.getByRole("button", { name: "Copy raw" }));
+    expect(await navigator.clipboard.readText()).toBe("Streaming.");
+  });
 });

@@ -16,7 +16,7 @@ from a2a.types import (
     SubscribeToTaskRequest,
 )
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from a2a_workbench.core.a2a_json import (
     INTERRUPTED_STATES,
@@ -216,6 +216,21 @@ class ConversationService:
         if conv is None:
             raise ConversationNotFoundError(f"conversation {conversation_id} not found")
         return _out(conv)
+
+    async def delete(self, conversation_id: str) -> None:
+        """Delete a conversation with its timeline events and recorded exchanges.
+
+        Raises:
+            ConversationNotFoundError: if it does not exist.
+        """
+        await self._load(conversation_id)
+        async with self._db.sessions() as session:
+            await session.execute(
+                delete(TimelineEventRow).where(TimelineEventRow.conversation_id == conversation_id)
+            )
+            await session.execute(delete(Conversation).where(Conversation.id == conversation_id))
+            await session.commit()
+        await self._sink.delete_for(conversation_id)  # type: ignore[attr-defined]
 
     async def list_for_agent(self, agent_id: str) -> list[ConversationOut]:
         """Return an agent's conversations, most recently updated first."""
@@ -542,11 +557,12 @@ class ConversationService:
             yield await self._error(conversation_id, exc)
             return
         message = Message(message_id=uuid.uuid4().hex, role=Role.ROLE_USER, parts=built)
-        context_id = options.context_id or conv.context_id
+        inherit = options.inherit_ids
+        context_id = options.context_id or (conv.context_id if inherit else None)
         if context_id:
             message.context_id = context_id
         task_id = options.task_id or (
-            conv.task_id if conv.task_state in INTERRUPTED_STATES else None
+            conv.task_id if inherit and conv.task_state in INTERRUPTED_STATES else None
         )
         if task_id:
             message.task_id = task_id

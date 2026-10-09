@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from a2a_workbench import __version__
 from a2a_workbench.api import (
     routes_agents,
+    routes_assistant,
     routes_conversations,
     routes_misc,
     routes_oauth,
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
         routes_tasks,
         routes_security,
         routes_oauth,
+        routes_assistant,
         ws,
     ):
         app.include_router(module.router)

@@ -44,7 +44,7 @@ export class Hub {
       const msg = JSON.parse(String(e.data)) as HubMessage;
       const sub = this.subs.get(msg.topic);
       if (!sub) return;
-      const seq = (msg.event as { seq?: number } | undefined)?.seq;
+      const seq = ((msg.event ?? msg.step) as { seq?: number } | undefined)?.seq;
       if (typeof seq === "number") sub.lastSeq = Math.max(sub.lastSeq, seq);
       sub.handlers.forEach((h) => h(msg));
     };

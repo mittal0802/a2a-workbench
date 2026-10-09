@@ -25,6 +25,10 @@ Tools (all return JSON; failures come back as `{"error": {...}}`):
 | `set_credential(agent, scheme, api_key? / username+password? / token? / access_token? / cert_pem+key_pem?)` | Store a credential |
 | `sign_in(agent, scheme, client_id, client_secret?, scopes?)` | OAuth client credentials or password; for device code it returns `user_code` + `verification_uri`, then `poll_sign_in(flow_id)` |
 | `sign_out(agent, scheme)`, `auth_probe(agent)` | Remove a credential; check the agent enforces its declared auth |
+| `assist(goal, agents?, provider, model?, response_mode?, session_id?)` | Run an orchestrator LLM that calls the agents as an A2A client agent; returns `steps` (tool_call, rejected_call, tool_result with `conversation_id` and ids, agent_output, paused, limit, error, done), `status` and `final_text` |
+| `assistant_providers()` | Which LLM providers have a key (masked) |
+| `delete_conversation(conversation_id)`, `delete_assistant_chat(session_id)` | Delete a conversation or an Assistant chat with its recorded traffic |
+| `integration_guide(agent, target?)` | Code for calling the agent from the plain SDK, ADK, LangGraph, OpenAI Agents or Claude Agent SDK, with guidance and readiness findings |
 
 ## Use it from a shell
 
@@ -42,6 +46,17 @@ A2AW_CLIENT_SECRET="$SECRET" a2a-workbench auth login "My agent" oauth --client-
 a2a-workbench auth login "My agent" oauthDevice --client-id "$ID"   # prints a code to enter
 a2a-workbench auth probe "My agent" --json
 ```
+
+Agent-calling mode and integration code:
+
+```bash
+a2a-workbench assist "what can you do?" --agents "My agent" --provider anthropic --json
+a2a-workbench assist "B" --session <id> --json        # continue, or answer an agent's question
+a2a-workbench integrate "My agent" --target langgraph > call_my_agent.py
+```
+
+`assist` exits `0` when done or waiting for the user, `1` when a limit was hit
+and `4` when an agent needs sign-in or no provider key is set.
 
 Browser sign-in flows (authorization code, implicit, OpenID Connect) need a
 person: ask the user to sign in from the web UI or with `a2a-workbench auth
@@ -85,5 +100,8 @@ States are lowercase A2A task states: `submitted`, `working`, `input_required`,
 6. Authentication: if a call fails with category `auth`, read `auth_status`,
    sign in, retry; then `auth_probe` to confirm the agent rejects anonymous
    and wrong credentials.
-7. Try every binding the card lists (switch with the web UI connection menu,
+7. Agent callers: `assist` with your agent enabled shows how an orchestrator
+   uses it; `rejected_call` steps and §3.7 warnings point at card or behaviour
+   gaps, and `integration_guide` lists readiness advice.
+8. Try every binding the card lists (switch with the web UI connection menu,
    or `send --interface <url>`).

@@ -1,8 +1,9 @@
 import { Avatar } from "../../components/Avatar";
+import { CopyButton } from "../../components/CopyButton";
 import { INTERRUPTED, RUNNING } from "../../lib/labels";
 import type { AgentTurn, UserTurn } from "../../lib/timeline";
 import type { A2APart, ErrorData } from "../../lib/types";
-import { ArtifactCard } from "./ArtifactCard";
+import { ArtifactCard, joinTextRuns } from "./ArtifactCard";
 import { AskCard } from "./AskCard";
 import { EventLog } from "./EventLog";
 import { PartView } from "./PartView";
@@ -15,6 +16,14 @@ const ERROR_TITLE: Record<ErrorData["category"], string> = {
   protocol: "The agent returned an error",
   workbench: "Something went wrong in the Workbench",
 };
+
+/** The text parts of ``parts``, joined by blank lines. */
+export function rawText(parts: A2APart[]): string {
+  return parts
+    .map((p) => p.text)
+    .filter((t): t is string => typeof t === "string" && t.length > 0)
+    .join("\n\n");
+}
 
 /** A message the user sent. */
 export function UserBubble({ turn }: { turn: UserTurn }) {
@@ -57,20 +66,29 @@ export function AgentBubble({
     turn.events.filter((e) => e.kind === "artifact" && e.data.last_chunk).map((e) => e.data.assembled.artifactId),
   );
   const finished = turn.current !== null && !RUNNING.has(turn.current);
+  const raw = rawText([
+    ...turn.messages.flatMap((m) => m.parts),
+    ...Object.values(turn.artifacts).flatMap((a) => joinTextRuns(a.parts ?? [])),
+    ...(turn.statusMessage?.parts ?? []),
+  ]);
   const exchangeOf = (artifactId: string) =>
     [...turn.events].reverse().find((e) => e.kind === "artifact" && e.data.assembled?.artifactId === artifactId)?.exchange_id;
   return (
     <div className="msg">
       <Avatar name={agentName} size={32} />
       <div className="bubble" style={{ flex: 1, minWidth: 0 }}>
-        <div className="name">
-          {agentName} <span>· {seconds.toFixed(1)}s</span>
+        <div className="name" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span>
+            {agentName} <span>· {seconds.toFixed(1)}s</span>
+          </span>
+          <span className="spacer" />
+          {raw && <CopyButton text={() => raw} label="Copy raw" className="ib copyraw" />}
         </div>
         {turn.states.length > 0 && <TaskProgress states={turn.states} current={turn.current} />}
         {turn.messages.map((m, i) => (
           <div key={i} style={{ marginBottom: 8 }}>
             {m.parts.map((p, j) => (
-              <PartView key={j} part={p} />
+              <PartView key={j} part={p} markdown />
             ))}
           </div>
         ))}
@@ -107,7 +125,7 @@ export function AgentBubble({
           turn.statusMessage && (
             <div style={{ color: turn.current && RUNNING.has(turn.current) ? "var(--muted)" : undefined, marginBottom: 6 }}>
               {turn.statusMessage.parts.map((p, i) => (
-                <PartView key={i} part={p} />
+                <PartView key={i} part={p} markdown />
               ))}
             </div>
           )

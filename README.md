@@ -8,9 +8,11 @@ Debug, test and conformance-check any [A2A](https://a2a-protocol.org) agent: a f
 - **Break the connection on purpose**: inject faults beneath the SDK (dropped streams, latency, resets) and check that resubscribe gets you back in sync.
 - **Sign in** with every security scheme the spec defines, and check the agent actually enforces it.
 - **Inspect** every request, response and server-sent event that went over the wire, with secrets redacted; copy or export it as JSON.
+- **Agent-calling mode**: an Assistant (Anthropic, OpenAI or any OpenAI-compatible server, Gemini; your own key) calls your agents as tools, exactly the way the A2A spec defines a client agent, so you can test how your agent behaves when another agent calls it.
+- **Integrate**: copy-ready code for calling an agent from the plain `a2a-sdk`, Google ADK, LangGraph, the OpenAI Agents SDK or the Claude Agent SDK, plus advice on how ready the card is for agent callers.
 - **Script it**: every action is also a CLI command with `--json` / NDJSON output and stable exit codes, and an MCP tool for AI agents.
 
-> Status: Phase 3 of 7 (security). See the [design spec](docs/superpowers/specs/2026-10-07-a2a-workbench-design.md) for the roadmap: agent-calling mode (an LLM orchestrator calling your agents the way the A2A spec defines) and integration guides, push notifications, health checks, and the hosted instance.
+> Status: Phase 4 of 7 (agent-calling mode and Integrate). See the [design spec](docs/superpowers/specs/2026-10-07-a2a-workbench-design.md) for the roadmap: push notifications, health checks, and the hosted instance.
 
 ## Quick start
 
@@ -79,11 +81,38 @@ Secrets never need to be command-line arguments (which end up in shell history a
 
 Credentials are encrypted at rest (AES-GCM) with `A2AW_SECRET_KEY`, or a key generated in `~/.a2a-workbench/secret.key` (mode 0600). They are never logged, never returned by the API (only masked previews such as `••••a91`), and redacted in every recorded exchange.
 
+## Agent-calling mode (the Assistant)
+
+The Assistant is an orchestrator LLM acting as an A2A client agent. Each agent you enable becomes one tool built only from its card (description, skills, examples, media types); the tool's inputs are exactly the A2A `Message` / `SendMessageConfiguration` fields. Before anything is sent, calls that break the protocol are rejected and shown: a `context_id` the agent never returned (§3.4.1), an unknown or finished `task_id` (follow-ups go in the same context with `reference_task_ids`), mismatched ids (§3.4.3), or parts the agent's input modes do not accept.
+
+Every call is an ordinary conversation you can open in Chat, with full Inspect, faults and resubscribe, so you see exactly what the orchestrator sent. Streams that drop are resubscribed (§3.5.2), artifacts are the result (§3.7, with a warning when an agent returns output only in messages), and `auth_required` pauses the chat for you to sign in (§7.6.2) while the task is watched.
+
+How results reach you is your choice (A2A leaves presentation to the client):
+
+- **Assistant rewrites**: agents answer the Assistant and it answers you; each agent's raw output stays in its step.
+- **Agents speak directly**: agents' output and questions come to you verbatim, your reply to a question goes straight to that agent, and the Assistant's context records what you saw.
+
+Keys are managed on the **Settings** page (sidebar ⚙): one card per provider showing whether a key is saved or comes from the environment (never the key itself), with presets for OpenAI-compatible servers. **Inspect** on an Assistant chat shows every raw HTTP call made to the LLM provider (request and response bodies, headers with keys masked); each reply links to the call that produced it. Chats, conversations and agents can be deleted from the UI (`a2a-workbench chats list|calls|delete` on the CLI).
+
+```bash
+A2AW_LLM_API_KEY=… a2a-workbench providers set anthropic       # or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
+a2a-workbench providers set openai --base-url http://localhost:11434/v1   # Ollama, vLLM, LM Studio…
+a2a-workbench assist "Book the cheapest flight to SFO" --agents "Travel agent" --json      # NDJSON steps
+a2a-workbench assist "ask" --agents "Zoo agent" --response-mode pass-through
+a2a-workbench assist "B" --session <id>                       # answer the agent's question
+a2a-workbench chats calls <id> --json                         # raw LLM requests and responses (keys masked)
+```
+
+## Integrate
+
+The Integrate tab (also `a2a-workbench integrate <agent> --target sdk|adk|langgraph|openai|claude` and the MCP `integration_guide` tool) generates client code from the agent's card. The plain-SDK code resolves the card, authenticates with the card's own schemes (secrets from environment variables), streams when declared, keeps `context_id` and `task_id`, continues `input_required` tasks, references finished tasks in follow-ups, resubscribes after a dropped stream, returns artifacts and raises `AuthRequired` for `auth_required`; every rule is commented with its spec section, and CI runs it against the reference agent. The framework versions wrap the same function as a tool (or use ADK's `RemoteA2aAgent`). A readiness list separates spec issues (missing REQUIRED skill fields) from advice (no examples, no media types, an extended card declared but not configured, …).
+
 ## Development
 
 ```bash
 git config core.hooksPath .githooks
 scripts/dev.sh                     # zoo agent :9999, API :8484, Vite :5173
+uv run a2a-workbench fixtures --llm --port 9897   # scripted test LLM (OpenAI-compatible) for the Assistant
 cd server && uv run pytest         # backend tests
 cd web && pnpm test                # frontend tests
 scripts/build.sh --no-wheel && (cd web && pnpm e2e)   # end-to-end
