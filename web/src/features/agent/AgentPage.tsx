@@ -93,7 +93,6 @@ export function AgentPage() {
             conversationId={conversationId}
             onConversationChange={changeConversation}
             onInspect={inspect}
-            onOpenSecurity={() => navigate(`/agents/${a.id}/security`)}
           />
           <InspectDrawer
             conversationId={conversationId}
