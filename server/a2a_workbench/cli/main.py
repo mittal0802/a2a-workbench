@@ -336,9 +336,14 @@ def fixtures(
     auth: Annotated[
         str,
         typer.Option(
-            help="Require sign-in: apikey-header, apikey-query, apikey-cookie, basic, bearer, and."
+            help="Require sign-in: apikey-header, apikey-query, apikey-cookie, basic, bearer, "
+            "and, oauth, oidc."
         ),
     ] = "none",
+    idp_port: Annotated[
+        int | None,
+        typer.Option(help="Mock identity provider port for oauth/oidc (default: HTTP port + 3)."),
+    ] = None,
 ) -> None:
     """Run the zoo reference agent until interrupted."""
     import uvicorn
@@ -357,7 +362,21 @@ def fixtures(
         from a2a_workbench.fixtures.auth import ZOO_SECRETS
 
         typer.echo(f"Sign-in required ({auth}); test credentials: {ZOO_SECRETS}", err=True)
-    app_ = build_zoo_app(base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy, auth=auth)
+    idp = None
+    if auth in ("oauth", "oidc"):
+        from a2a_workbench.fixtures.idp import IDP_CLIENT, IdpServer
+
+        idp_server = IdpServer(port=idp_port or port + 3)
+        idp_server.start()
+        idp = idp_server.idp
+        typer.echo(
+            f"Mock identity provider at {idp.issuer}; client {IDP_CLIENT['id']} / "
+            f"{IDP_CLIENT['secret']}",
+            err=True,
+        )
+    app_ = build_zoo_app(
+        base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy, auth=auth, idp=idp
+    )
     uvicorn.run(app_, host=host, port=port)
 
 
