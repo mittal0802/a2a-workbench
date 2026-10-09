@@ -1,8 +1,10 @@
+import { useState } from "react";
+import { JsonView } from "../../components/JsonView";
 import { Avatar } from "../../components/Avatar";
 import { CopyButton } from "../../components/CopyButton";
-import { INTERRUPTED, RUNNING } from "../../lib/labels";
+import { INTERRUPTED, RUNNING, stateLabel, toneClass } from "../../lib/labels";
 import type { AgentTurn, UserTurn } from "../../lib/timeline";
-import type { A2APart, ErrorData } from "../../lib/types";
+import type { A2APart, ErrorData, TimelineEvent } from "../../lib/types";
 import { ArtifactCard, joinTextRuns } from "./ArtifactCard";
 import { AskCard } from "./AskCard";
 import { EventLog } from "./EventLog";
@@ -23,6 +25,49 @@ export function rawText(parts: A2APart[]): string {
     .map((p) => p.text)
     .filter((t): t is string => typeof t === "string" && t.length > 0)
     .join("\n\n");
+}
+
+/** Push notifications the agent delivered for this turn's task. */
+function PushCards({ pushes }: { pushes: TimelineEvent[] }) {
+  return (
+    <>
+      {pushes.map((p) => (
+        <PushCard key={p.seq} event={p} />
+      ))}
+    </>
+  );
+}
+
+function PushCard({ event }: { event: TimelineEvent }) {
+  const [open, setOpen] = useState(false);
+  const state = event.data.state ? stateLabel(event.data.state) : null;
+  return (
+    <div className={`step ${open ? "open" : ""}`} data-testid={`push-${event.data.delivery_id}`}>
+      <button className="step-h" style={{ width: "100%", textAlign: "left" }} onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span aria-hidden>🔔</span>
+        <div>
+          Notification · {event.data.kind ?? "update"}
+          <br />
+          <small>{new Date(event.ts).toLocaleTimeString()} · delivered to a Workbench webhook</small>
+        </div>
+        <div className="spacer" />
+        {state && (
+          <span className={`state ${toneClass(state.tone)}`}>
+            <i />
+            {state.label}
+          </span>
+        )}
+      </button>
+      <div className="step-b">
+        {(event.data.notes ?? []).map((n: string, i: number) => (
+          <div key={i} className="no">
+            {n}
+          </div>
+        ))}
+        {event.data.payload && <JsonView value={event.data.payload} />}
+      </div>
+    </div>
+  );
 }
 
 /** A message the user sent. */
@@ -130,6 +175,7 @@ export function AgentBubble({
             </div>
           )
         )}
+        {turn.pushes.length > 0 && <PushCards pushes={turn.pushes} />}
         {turn.recovered && <RecoveredSummary data={turn.recovered} />}
         {turn.lost && !(turn.recovered && (turn.recovered.terminal || turn.recovered.method === "subscribe")) && (
           <ConnectionLostCard data={turn.lost} onResubscribe={onResubscribe} onCheck={onCheckStatus} />

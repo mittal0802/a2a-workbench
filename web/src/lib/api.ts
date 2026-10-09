@@ -1,5 +1,9 @@
 import type { DiffEntry } from "../features/about/CardDiff";
 import type {
+  NewPushConfig,
+  PublicUrl,
+  PushConfig,
+  PushDelivery,
   IntegrationGuide,
   AssistantSession,
   AssistantStep,
@@ -60,6 +64,23 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 const json = (b: unknown) => JSON.stringify(b);
 
 export const api = {
+  listPushConfigs: (agentId: string, taskId: string) =>
+    call<{ configs: PushConfig[]; next_page_token: string | null }>(`/api/agents/${agentId}/tasks/${taskId}/push-configs`),
+  createPushConfig: (agentId: string, taskId: string, body: NewPushConfig) =>
+    call<{ config: PushConfig; hook: { id: string; url: string } | null }>(`/api/agents/${agentId}/tasks/${taskId}/push-configs`, {
+      method: "POST",
+      body: json(body),
+    }),
+  getPushConfig: (agentId: string, taskId: string, configId: string) =>
+    call<PushConfig>(`/api/agents/${agentId}/tasks/${taskId}/push-configs/${configId}`),
+  deletePushConfig: (agentId: string, taskId: string, configId: string) =>
+    call<void>(`/api/agents/${agentId}/tasks/${taskId}/push-configs/${configId}`, { method: "DELETE" }),
+  pushDeliveries: (agentId: string) => call<PushDelivery[]>(`/api/agents/${agentId}/push/deliveries`),
+  publicUrl: () => call<PublicUrl>("/api/settings/public-url"),
+  setPublicUrl: (public_base_url: string | null) =>
+    call<PublicUrl>("/api/settings/public-url", { method: "PUT", body: json({ public_base_url }) }),
+  startTunnel: () => call<PublicUrl>("/api/settings/tunnel", { method: "POST" }),
+  stopTunnel: () => call<PublicUrl>("/api/settings/tunnel", { method: "DELETE" }),
   integration: (agentId: string) => call<IntegrationGuide>(`/api/agents/${agentId}/integration`),
   assistantProviders: () => call<ProviderInfo[]>("/api/assistant/providers"),
   putAssistantProvider: (provider: string, body: { api_key: string; base_url?: string | null }) =>

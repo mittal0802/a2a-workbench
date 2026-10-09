@@ -105,4 +105,20 @@ describe("Composer", () => {
     screen.getByRole("button", { name: /stop task/i }).click();
     expect(onStop).toHaveBeenCalled();
   });
+  it("asks for push notifications only when the card declares them", async () => {
+    const onSend = vi.fn();
+    const pushAgent = { card: { capabilities: { streaming: true, pushNotifications: true } } } as never;
+    render(<Composer agent={pushAgent} onSend={onSend} onStop={() => {}} replying={false} busy={false} />);
+    await userEvent.click(screen.getByRole("button", { name: /options/i }));
+    await userEvent.click(screen.getByRole("switch", { name: /notify me by webhook/i }));
+    await userEvent.keyboard("{Escape}");
+    await userEvent.type(screen.getByPlaceholderText(/message/i), "long{Enter}");
+    expect(onSend.mock.calls[0][1]).toMatchObject({ push: true });
+  });
+
+  it("explains push is not declared", async () => {
+    render(<Composer agent={streamingAgent} onSend={() => {}} onStop={() => {}} replying={false} busy={false} />);
+    await userEvent.click(screen.getByRole("button", { name: /options/i }));
+    expect(screen.getByText(/does not declare push notifications/i)).toBeInTheDocument();
+  });
 });

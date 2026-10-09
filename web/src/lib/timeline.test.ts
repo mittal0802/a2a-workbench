@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTurns } from "./timeline";
+import { buildTurns, type AgentTurn } from "./timeline";
 import type { TimelineEvent } from "./types";
 
 const ev = (
@@ -103,5 +103,21 @@ describe("buildTurns", () => {
     if (agent.kind !== "agent") throw new Error();
     expect(agent.lost?.last_state).toBe("working");
     expect(agent.recovered?.snapshot_first).toBe(true);
+  });
+});
+
+describe("push events", () => {
+  it("attach to the agent turn and update its state", () => {
+    const ev = (seq: number, kind: string, data: Record<string, unknown>) =>
+      ({ conversation_id: "c", seq, kind, ts: "", task_id: "t", context_id: "x", exchange_id: null, data }) as never;
+    const turns = buildTurns([
+      ev(1, "user_message", { message: { parts: [] } }),
+      ev(2, "task", { state: "working", task: { id: "t" } }),
+      ev(3, "push", { kind: "status_update", state: "completed", delivery_id: "d1", payload: { statusUpdate: { taskId: "t" } } }),
+    ]);
+    const agent = turns[1] as AgentTurn;
+    expect(agent.pushes).toHaveLength(1);
+    expect(agent.current).toBe("completed");
+    expect(agent.states).toEqual(["working", "completed"]);
   });
 });

@@ -14,6 +14,7 @@ export type AgentTurn = {
   error: ErrorData | null;
   lost: ConnectionLostData | null;
   recovered: RecoveryData | null;
+  pushes: TimelineEvent[];
 };
 export type Turn = UserTurn | AgentTurn;
 
@@ -30,6 +31,7 @@ const emptyAgent = (): AgentTurn => ({
   error: null,
   lost: null,
   recovered: null,
+  pushes: [],
 });
 
 /** Group a conversation's events into alternating user and agent turns, ordered by seq. */
@@ -72,6 +74,14 @@ export function buildTurns(events: TimelineEvent[]): Turn[] {
       agent.recovered = null;
     }
     if (e.kind === "recovered") agent.recovered = e.data as RecoveryData;
+    if (e.kind === "push") {
+      agent.pushes.push(e);
+      const state = e.data.state as string | null;
+      if (state) {
+        if (agent.states[agent.states.length - 1] !== state) agent.states.push(state);
+        agent.current = state;
+      }
+    }
   }
   return turns;
 }
