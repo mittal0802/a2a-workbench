@@ -116,6 +116,17 @@ class TurnInProgressError(RuntimeError):
     """A turn or resume is already running for this Assistant chat."""
 
 
+MAX_AUTO_RESUMES = 3
+
+
+def _new_budget() -> dict[str, float]:
+    return {"started": time.time(), "tokens": 0, "steps": 0, "auto_resumes": 0}
+
+
+def _remaining(budget: dict[str, Any], limits: Limits) -> float:
+    return limits.run_timeout_s - (time.time() - float(budget.get("started", time.time())))
+
+
 def _out(row: AssistantSession) -> SessionOut:
     return SessionOut(
         id=row.id,
@@ -396,7 +407,7 @@ class AssistantService:
         await self._save(sid, transcript=transcript)
 
     async def _turn(self, sid: str, text: str) -> None:
-        row = await self._load(sid)
+        row = await self._save(sid, budget=_new_budget())
         if row.status == "awaiting_user" and row.pending:
             await self._save(sid, status="running")
             await self._emit(sid, "user", {"text": text, "to_agent": row.pending.get("agent")})
@@ -446,13 +457,16 @@ class AssistantService:
     async def _loop_with(self, sid: str, adapter: LLMAdapter, limits: Limits) -> None:
         row = await self._load(sid)
         tools = await self._tools(row)
-        started, tokens = time.monotonic(), 0
-        for _ in range(limits.max_steps):
-            remaining = limits.run_timeout_s - (time.monotonic() - started)
+        budget = dict(row.budget or _new_budget())
+        while True:
+            if budget["steps"] >= limits.max_steps:
+                await self._limit(sid, "max_steps", limits.max_steps)
+                return
+            remaining = _remaining(budget, limits)
             if remaining <= 0:
                 await self._limit(sid, "run_timeout", limits.run_timeout_s)
                 return
-            if tokens >= limits.token_budget:
+            if budget["tokens"] >= limits.token_budget:
                 await self._limit(sid, "token_budget", limits.token_budget)
                 return
             row = await self._load(sid)
@@ -468,7 +482,10 @@ class AssistantService:
             except TimeoutError:
                 await self._limit(sid, "run_timeout", limits.run_timeout_s)
                 return
-            tokens += reply.usage.input_tokens + reply.usage.output_tokens
+            budget["tokens"] += reply.usage.input_tokens + reply.usage.output_tokens
+            budget["steps"] += 1
+            await self._save(sid, budget=dict(budget))
+            tokens = budget["tokens"]
             await self._append(
                 sid, ChatMessage(role="assistant", text=reply.text, tool_calls=reply.tool_calls)
             )
@@ -488,7 +505,6 @@ class AssistantService:
                 return
             if await self._calls(sid, tools, reply.tool_calls, limits):
                 return
-        await self._limit(sid, "max_steps", limits.max_steps)
 
     async def _limit(self, sid: str, name: str, value: float) -> None:
         await self._save(sid, status="idle")
@@ -573,7 +589,10 @@ class AssistantService:
 
     async def _pause(self, sid: str, pause: dict[str, Any]) -> None:
         status = "awaiting_sign_in" if pause["reason"] == "auth_required" else "awaiting_user"
-        await self._save(sid, status=status, pending=pause)
+        row = await self._load(sid)
+        budget = dict(row.budget or _new_budget())
+        budget["paused_at"] = time.time()
+        await self._save(sid, status=status, pending=pause, budget=budget)
         await self._emit(sid, "paused", pause)
         if status == "awaiting_sign_in":
             old = self._watchers.pop(sid, None)
@@ -691,7 +710,9 @@ class AssistantService:
             agent_id,
             args,
             conversation_id=conversation_id,
-            timeout_s=limits.call_timeout_s,
+            timeout_s=max(
+                0.1, min(limits.call_timeout_s, _remaining(row.budget or _new_budget(), limits))
+            ),
             on_event=on_event,
         )
         await self._record(sid, agent_id, result)
@@ -891,7 +912,12 @@ class AssistantService:
         watcher = self._watchers.pop(sid, None)
         if watcher and watcher is not asyncio.current_task():
             watcher.cancel()
-        await self._save(sid, status="running", pending=None)
+        budget = dict(row.budget or _new_budget())
+        if budget.get("paused_at"):
+            budget["started"] = (
+                float(budget["started"]) + time.time() - float(budget.pop("paused_at"))
+            )
+        await self._save(sid, status="running", pending=None, budget=budget)
         await self._emit(
             sid, "resumed", {"agent": pending.get("agent"), "task_id": pending.get("task_id")}
         )
@@ -917,6 +943,11 @@ class AssistantService:
         await self._append(sid, ChatMessage(role="user", text=note))
         await self._loop(sid)
 
+    @staticmethod
+    def _may_auto_resume(row: AssistantSession) -> bool:
+        """Whether the sign-in watch may resume on its own (at most ``MAX_AUTO_RESUMES`` a turn)."""
+        return int((row.budget or {}).get("auto_resumes", 0)) < MAX_AUTO_RESUMES
+
     async def _watch(self, sid: str, pause: dict[str, Any]) -> None:
         """Poll the paused task with GetTask (A2A §7.6.2) and resume when its state changes."""
         row = await self._load(sid)
@@ -930,10 +961,15 @@ class AssistantService:
                 return
             result = await self._executor.get_task(pause["agent_id"], pause["task_id"])
             if result.state and result.state != "auth_required":
+                if not self._may_auto_resume(row):
+                    return
                 try:
                     steps = self.resume(sid)
                 except TurnInProgressError:
                     continue
+                budget = dict(row.budget or _new_budget())
+                budget["auto_resumes"] = budget.get("auto_resumes", 0) + 1
+                await self._save(sid, budget=budget)
                 self._watchers.pop(sid, None)
                 async for _ in steps:
                     pass

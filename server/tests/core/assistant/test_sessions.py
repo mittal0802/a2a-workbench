@@ -304,3 +304,45 @@ async def test_a_second_turn_while_one_runs_is_refused_and_stop_hits_the_running
     assert steps[-1].kind == "limit" and steps[-1].data["limit"] == "stopped"
     after = await _turn(svc, s.id, "echo third")
     assert after[-1].kind == "done"
+
+
+async def test_run_timeout_bounds_agent_calls(svc, agent):
+    import time
+
+    s = await _session(svc, agent, limits=Limits(run_timeout_s=1.5, call_timeout_s=30))
+    started = time.monotonic()
+    steps = await _turn(svc, s.id, "slow 6")
+    assert time.monotonic() - started < 4
+    assert steps[-1].kind == "limit" and steps[-1].data["limit"] == "run_timeout"
+
+
+async def test_resume_continues_the_same_turn_budget(svc, wb, oauth_zoo):
+    agent = await wb.agents.add(oauth_zoo.base_url)
+    await _sign_in(wb, agent, ["a2a:invoke"])
+    s = await _session(svc, agent, limits=Limits(max_steps=1))
+    first = await _turn(svc, s.id, "hold AI175")
+    assert first[-1].kind == "paused"
+    await _sign_in(wb, agent, ["a2a:invoke", "booking.write"])
+    resumed = [st async for st in svc.resume(s.id)]
+    assert resumed[-1].kind == "limit" and resumed[-1].data["limit"] == "max_steps"
+    assert not any(st.kind == "assistant" for st in resumed)
+
+
+async def test_automatic_resumes_are_capped(svc, wb, oauth_zoo):
+    agent = await wb.agents.add(oauth_zoo.base_url)
+    s = await _session(svc, agent)
+    row = await svc._save(s.id, budget={"started": 0, "tokens": 0, "steps": 0, "auto_resumes": 3})
+    assert svc._may_auto_resume(row) is False
+    row = await svc._save(s.id, budget={"started": 0, "tokens": 0, "steps": 0, "auto_resumes": 2})
+    assert svc._may_auto_resume(row) is True
+
+
+async def test_time_spent_paused_does_not_count(svc, wb, oauth_zoo):
+    agent = await wb.agents.add(oauth_zoo.base_url)
+    await _sign_in(wb, agent, ["a2a:invoke"])
+    s = await _session(svc, agent, limits=Limits(run_timeout_s=3))
+    assert (await _turn(svc, s.id, "hold AI175"))[-1].kind == "paused"
+    await asyncio.sleep(3.2)
+    await _sign_in(wb, agent, ["a2a:invoke", "booking.write"])
+    resumed = [st async for st in svc.resume(s.id)]
+    assert resumed[-1].kind == "done", [(x.kind, x.data) for x in resumed]

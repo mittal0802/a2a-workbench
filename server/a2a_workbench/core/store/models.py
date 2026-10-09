@@ -155,6 +155,7 @@ class AssistantSession(Base):
     ids: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     contexts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     pending: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    budget: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     last_seq: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
