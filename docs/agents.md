@@ -27,6 +27,7 @@ Tools (all return JSON; failures come back as `{"error": {...}}`):
 | `sign_out(agent, scheme)`, `auth_probe(agent)` | Remove a credential; check the agent enforces its declared auth |
 | `assist(goal, agents?, provider, model?, response_mode?, session_id?)` | Run an orchestrator LLM that calls the agents as an A2A client agent; returns `steps` (tool_call, rejected_call, tool_result with `conversation_id` and ids, agent_output, paused, limit, error, done), `status` and `final_text` |
 | `assistant_providers()` | Which LLM providers have a key (masked) |
+| `delete_conversation(conversation_id)`, `delete_assistant_chat(session_id)` | Delete a conversation or an Assistant chat with its recorded traffic |
 | `integration_guide(agent, target?)` | Code for calling the agent from the plain SDK, ADK, LangGraph, OpenAI Agents or Claude Agent SDK, with guidance and readiness findings |
 
 ## Use it from a shell

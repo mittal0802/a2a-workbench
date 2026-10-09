@@ -92,12 +92,15 @@ How results reach you is your choice (A2A leaves presentation to the client):
 - **Assistant rewrites**: agents answer the Assistant and it answers you; each agent's raw output stays in its step.
 - **Agents speak directly**: agents' output and questions come to you verbatim, your reply to a question goes straight to that agent, and the Assistant's context records what you saw.
 
+Keys are managed on the **Settings** page (sidebar ⚙): one card per provider showing whether a key is saved or comes from the environment (never the key itself), with presets for OpenAI-compatible servers. **Inspect** on an Assistant chat shows every raw HTTP call made to the LLM provider (request and response bodies, headers with keys masked); each reply links to the call that produced it. Chats, conversations and agents can be deleted from the UI (`a2a-workbench chats list|calls|delete` on the CLI).
+
 ```bash
 A2AW_LLM_API_KEY=… a2a-workbench providers set anthropic       # or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
 a2a-workbench providers set openai --base-url http://localhost:11434/v1   # Ollama, vLLM, LM Studio…
 a2a-workbench assist "Book the cheapest flight to SFO" --agents "Travel agent" --json      # NDJSON steps
 a2a-workbench assist "ask" --agents "Zoo agent" --response-mode pass-through
 a2a-workbench assist "B" --session <id>                       # answer the agent's question
+a2a-workbench chats calls <id> --json                         # raw LLM requests and responses (keys masked)
 ```
 
 ## Integrate
