@@ -121,3 +121,24 @@ describe("push events", () => {
     expect(agent.states).toEqual(["working", "completed"]);
   });
 });
+
+describe("push events of an earlier task", () => {
+  it("attach to that task's turn and never move a finished state back", () => {
+    const ev = (seq: number, kind: string, task: string | null, data: Record<string, unknown>) =>
+      ({ conversation_id: "c", seq, kind, ts: "", task_id: task, context_id: "x", exchange_id: null, data }) as never;
+    const turns = buildTurns([
+      ev(1, "user_message", null, { message: { parts: [] } }),
+      ev(2, "task", "A", { state: "working", task: { id: "A" } }),
+      ev(3, "user_message", null, { message: { parts: [] } }),
+      ev(4, "task", "B", { state: "completed", task: { id: "B" } }),
+      ev(5, "push", "A", { kind: "status_update", state: "completed", delivery_id: "d1" }),
+      ev(6, "push", "A", { kind: "status_update", state: "working", delivery_id: "d2" }),
+    ]);
+    const a = turns[1] as AgentTurn;
+    const b = turns[3] as AgentTurn;
+    expect(a.pushes.map((p) => p.data.delivery_id)).toEqual(["d1", "d2"]);
+    expect(a.current).toBe("completed");
+    expect(b.pushes).toEqual([]);
+    expect(b.current).toBe("completed");
+  });
+});

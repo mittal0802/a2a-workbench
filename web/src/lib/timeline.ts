@@ -34,7 +34,22 @@ const emptyAgent = (): AgentTurn => ({
   pushes: [],
 });
 
-/** Group a conversation's events into alternating user and agent turns, ordered by seq. */
+const FINISHED = new Set(["completed", "failed", "canceled", "rejected"]);
+
+/** Records a push delivery on the turn of its task; its state advances the turn unless the turn already finished. */
+function applyPush(turn: AgentTurn, e: TimelineEvent) {
+  turn.pushes.push(e);
+  turn.taskId = turn.taskId ?? e.task_id;
+  const state = e.data.state as string | null;
+  if (!state || (turn.current && FINISHED.has(turn.current))) return;
+  if (turn.states[turn.states.length - 1] !== state) turn.states.push(state);
+  turn.current = state;
+}
+
+/** Group a conversation's events into alternating user and agent turns, ordered by seq.
+ *
+ * Push events join the turn of the task they report on, wherever it is.
+ */
 export function buildTurns(events: TimelineEvent[]): Turn[] {
   const turns: Turn[] = [];
   let agent: AgentTurn | null = null;
@@ -43,6 +58,14 @@ export function buildTurns(events: TimelineEvent[]): Turn[] {
       turns.push({ kind: "user", event: e });
       agent = null;
       continue;
+    }
+    if (e.kind === "push") {
+      const owner = [...turns].reverse().find((t): t is AgentTurn => t.kind === "agent" && !!e.task_id && t.taskId === e.task_id);
+      if (owner) {
+        owner.events.push(e);
+        applyPush(owner, e);
+        continue;
+      }
     }
     if (!agent) {
       agent = emptyAgent();
@@ -74,14 +97,7 @@ export function buildTurns(events: TimelineEvent[]): Turn[] {
       agent.recovered = null;
     }
     if (e.kind === "recovered") agent.recovered = e.data as RecoveryData;
-    if (e.kind === "push") {
-      agent.pushes.push(e);
-      const state = e.data.state as string | null;
-      if (state) {
-        if (agent.states[agent.states.length - 1] !== state) agent.states.push(state);
-        agent.current = state;
-      }
-    }
+    if (e.kind === "push") applyPush(agent, e);
   }
   return turns;
 }
