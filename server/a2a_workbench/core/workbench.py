@@ -42,10 +42,10 @@ class Workbench:
             self.db, self.bus, self.exchanges, self.blobs, self.auth
         )
         self.tasks = TaskService(self.agents, self.exchanges, self.auth)
-        self.push = PushService(self.tasks)
         self.tunnel = Tunnel()
         self.hooks = HookStore(self.db, self.public_base_url)
         self.conversations.hooks = self.hooks
+        self.push = PushService(self.tasks, self.hooks)
         self.receiver = Receiver(self.db, self.hooks, self.conversations, self.bus)
         self.assistant = AssistantService(self)
         self.integrate = IntegrationService(self.agents)

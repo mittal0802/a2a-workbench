@@ -145,6 +145,7 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         extensions: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         conversation_id: str | None = None,
+        push: bool = False,
         faults: str | dict[str, Any] | None = None,
         timeout_s: float = 120,
         skill_id: str | None = None,
@@ -181,6 +182,7 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
             message_metadata=metadata,
             faults=profile,
             skill_id=skill_id,
+            push=push,
         )
         collected: list[Any] = []
         timed_out = False
@@ -560,6 +562,84 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         except Exception as exc:
             return _error(exc)
         return {"deleted": session_id}
+
+    @server.tool()
+    async def push_create(
+        agent: str,
+        task_id: str,
+        url: str | None = None,
+        token: str | None = None,
+        auth_scheme: str | None = None,
+        auth_credentials: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a push notification config for a task (CreateTaskPushNotificationConfig).
+
+        Without url, the config points at a new Workbench webhook (returned once
+        with its token and credentials); deliveries then show in push_deliveries
+        and as "push" events in the task's conversation. Needs `a2a-workbench
+        serve` running and reachable by the agent (see the public URL setting).
+        """
+        from a2a_workbench.core.push.service import mask_config
+
+        try:
+            out = await resolve(agent)
+            if url is None:
+                return await wb.push.create_workbench(out.id, task_id)
+            config = await wb.push.create(
+                out.id,
+                task_id,
+                url=url,
+                token=token,
+                auth_scheme=auth_scheme,
+                auth_credentials=auth_credentials,
+            )
+            return {"config": mask_config(config), "hook": None}
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def push_get(agent: str, task_id: str, config_id: str) -> dict[str, Any]:
+        """Return one push notification config of a task (secrets masked)."""
+        try:
+            return await wb.push.get((await resolve(agent)).id, task_id, config_id)
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def push_list(
+        agent: str, task_id: str, page_size: int | None = None, page_token: str | None = None
+    ) -> dict[str, Any]:
+        """List a task's push notification configs: configs and next_page_token (secrets masked)."""
+        try:
+            return await wb.push.list(
+                (await resolve(agent)).id, task_id, page_size=page_size, page_token=page_token
+            )
+        except Exception as exc:
+            return _error(exc)
+
+    @server.tool()
+    async def push_delete(agent: str, task_id: str, config_id: str) -> dict[str, Any]:
+        """Delete a push notification config (and the Workbench webhook behind it)."""
+        try:
+            await wb.push.delete((await resolve(agent)).id, task_id, config_id)
+        except Exception as exc:
+            return _error(exc)
+        return {"deleted": config_id}
+
+    @server.tool()
+    async def push_deliveries(agent: str) -> dict[str, Any]:
+        """Notifications the agent sent to Workbench webhooks, newest first.
+
+        Each has verdict (accepted or rejected), reasons (unauthenticated,
+        wrong_token, malformed, unexpected_task), notes, duplicate, kind, state
+        and the payload; secret headers are masked.
+        """
+        try:
+            out = await resolve(agent)
+            items = await wb.receiver.deliveries(out.id)
+        except Exception as exc:
+            return _error(exc)
+        return {"deliveries": [d.model_dump(mode="json") for d in items]}
 
     @server.tool()
     async def fault_presets() -> dict[str, Any]:

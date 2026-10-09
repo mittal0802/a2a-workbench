@@ -103,16 +103,18 @@ class TaskService:
         faults: FaultProfile | FaultInjector | None = None,
         *,
         streaming: bool = False,
+        redact_fields: frozenset[str] = frozenset(),
     ) -> AsyncIterator[tuple[Client, Any]]:
         """Yield an SDK client for the agent's selected interface and the call context.
 
         The context carries the agent's credentials; calls are recorded under
-        ``operation``. Failures are raised as ``AgentCallError``.
+        ``operation`` with ``redact_fields`` masked in bodies. Failures are
+        raised as ``AgentCallError``.
         """
         agent = await self._agents.row(agent_id)
         card = card_from_json(agent.card)
         plan = await self._auth.plan(agent_id, card) if self._auth else AuthPlan()
-        with recording_scope(operation, agent_id=agent_id):
+        with recording_scope(operation, agent_id=agent_id, redact_fields=redact_fields):
             try:
                 iface = select_interface(card, agent.selected_interface_url)
                 client = await open_client(

@@ -17,6 +17,7 @@ from a2a_workbench.api import (
     routes_hooks,
     routes_misc,
     routes_oauth,
+    routes_push,
     routes_security,
     routes_tasks,
     ws,
@@ -64,6 +65,7 @@ def create_app(settings: Settings | None = None, *, static_dir: Path = STATIC_DI
         routes_oauth,
         routes_assistant,
         routes_hooks,
+        routes_push,
         ws,
     ):
         app.include_router(module.router)
