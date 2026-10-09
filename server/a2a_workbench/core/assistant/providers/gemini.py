@@ -66,6 +66,10 @@ class GeminiAdapter:
         options = types.HttpOptions(base_url=base_url) if base_url else None
         self._client = genai.Client(api_key=api_key, http_options=options)
 
+    async def aclose(self) -> None:
+        """Close the provider client's connections."""
+        await self._client.aio.aclose()
+
     async def complete(
         self, system: str, messages: list[ChatMessage], tools: list[ToolSpec]
     ) -> LLMReply:

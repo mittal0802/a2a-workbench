@@ -366,14 +366,14 @@ class AssistantService:
     async def _turn(self, sid: str, text: str) -> None:
         row = await self._load(sid)
         if row.status == "awaiting_user" and row.pending:
-            await self._emit(sid, "user", {"text": text, "to_agent": row.pending.get("agent")})
             await self._save(sid, status="running")
+            await self._emit(sid, "user", {"text": text, "to_agent": row.pending.get("agent")})
             if not await self._direct_reply(sid, text):
                 return
         else:
+            await self._save(sid, status="running", pending=None)
             await self._emit(sid, "user", {"text": text})
             await self._append(sid, ChatMessage(role="user", text=text))
-            await self._save(sid, status="running", pending=None)
         await self._loop(sid)
 
     async def _adapter(self, row: AssistantSession) -> LLMAdapter | None:
@@ -404,6 +404,15 @@ class AssistantService:
         adapter = await self._adapter(row)
         if adapter is None:
             return
+        try:
+            await self._loop_with(sid, adapter, limits)
+        finally:
+            close = getattr(adapter, "aclose", None)
+            if close is not None:
+                await close()
+
+    async def _loop_with(self, sid: str, adapter: LLMAdapter, limits: Limits) -> None:
+        row = await self._load(sid)
         tools = await self._tools(row)
         started, tokens = time.monotonic(), 0
         for _ in range(limits.max_steps):

@@ -55,6 +55,10 @@ class OpenAIAdapter:
         self._key = api_key
         self._client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=1)
 
+    async def aclose(self) -> None:
+        """Close the provider client's connections."""
+        await self._client.close()
+
     async def complete(
         self, system: str, messages: list[ChatMessage], tools: list[ToolSpec]
     ) -> LLMReply:
