@@ -250,3 +250,40 @@ async def test_error_results_do_not_make_ids_known(svc, agent, wb):
     )
     ids = SessionIds((await svc._load(s.id)).ids)
     assert not ids.task_known(agent.id, "t-err") and not ids.context_known(agent.id, "c-err")
+
+
+def _assert_every_call_answered(transcript):
+    open_ids = []
+    for m in transcript:
+        if m["role"] == "assistant":
+            assert not open_ids, f"unanswered tool calls {open_ids}"
+            open_ids = [c["id"] for c in m["tool_calls"]]
+        elif m["role"] == "tool":
+            open_ids.remove(m["tool_call_id"])
+        else:
+            assert not open_ids, f"unanswered tool calls {open_ids}"
+    assert not open_ids
+
+
+async def test_stop_during_a_call_leaves_a_valid_transcript(svc, agent):
+    s = await _session(svc, agent)
+    gen = svc.send(s.id, "slow 3")
+    task = asyncio.ensure_future(_drain(gen))
+    await asyncio.sleep(0.6)
+    await svc.stop(s.id)
+    await asyncio.wait_for(task, 5)
+    _assert_every_call_answered((await svc._load(s.id)).transcript)
+    steps = await _turn(svc, s.id, "echo again")
+    assert steps[-1].kind == "done"
+    _assert_every_call_answered((await svc._load(s.id)).transcript)
+
+
+async def test_failure_during_a_call_leaves_a_valid_transcript(svc, agent, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("agent call exploded")
+
+    monkeypatch.setattr(svc._executor, "call", boom)
+    s = await _session(svc, agent)
+    steps = await _turn(svc, s.id, "echo hi")
+    assert steps[-1].kind == "error" and "exploded" in steps[-1].data["message"]
+    _assert_every_call_answered((await svc._load(s.id)).transcript)

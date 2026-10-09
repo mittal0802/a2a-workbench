@@ -480,10 +480,47 @@ class AssistantService:
     async def _calls(
         self, sid: str, tools: list[AgentTool], calls: list[ToolCall], limits: Limits
     ) -> bool:
-        """Run the model's tool calls in order; return True when the chat paused."""
+        """Run the model's tool calls in order; return True when the chat paused.
+
+        Every call gets a tool message, even when the turn is stopped or fails
+        part-way, so the transcript stays valid for the next request.
+        """
+        answered: set[str] = set()
+        try:
+            return await self._run_each(sid, tools, calls, limits, answered)
+        finally:
+            missing = [c for c in calls if c.id not in answered]
+            if missing:
+                await asyncio.shield(
+                    self._append(
+                        sid,
+                        *[
+                            ChatMessage(
+                                role="tool",
+                                tool_call_id=c.id,
+                                tool_name=c.name,
+                                is_error=True,
+                                text=json.dumps(
+                                    {"error": "not completed: the turn was interrupted"}
+                                ),
+                            )
+                            for c in missing
+                        ],
+                    )
+                )
+
+    async def _run_each(
+        self,
+        sid: str,
+        tools: list[AgentTool],
+        calls: list[ToolCall],
+        limits: Limits,
+        answered: set[str],
+    ) -> bool:
         for i, call in enumerate(calls):
             message, pause = await self._one_call(sid, tools, call, limits)
             await self._append(sid, message)
+            answered.add(call.id)
             if pause:
                 skipped = [
                     ChatMessage(
@@ -497,6 +534,7 @@ class AssistantService:
                 ]
                 if skipped:
                     await self._append(sid, *skipped)
+                    answered.update(c.id for c in calls[i + 1 :])
                 await self._pause(sid, pause)
                 return True
         return False
