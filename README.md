@@ -66,12 +66,14 @@ For browser sign-in, register `http://127.0.0.1:8484/oauth/callback` (web UI) or
 
 ```bash
 a2a-workbench auth status "My agent"
-a2a-workbench auth set "My agent" apiKey --api-key "$KEY"
-a2a-workbench auth login "My agent" oauth --client-id "$ID" --client-secret "$SECRET" --scope a2a:invoke
+A2AW_API_KEY=… a2a-workbench auth set "My agent" apiKey
+A2AW_CLIENT_SECRET=… a2a-workbench auth login "My agent" oauth --client-id "$ID" --scope a2a:invoke
 a2a-workbench auth login "My agent" oauthCode --client-id "$ID"       # opens your browser
 a2a-workbench auth probe "My agent" --json                             # is it enforced?
 a2a-workbench auth logout "My agent" oauth
 ```
+
+Secrets never need to be command-line arguments (which end up in shell history and `ps`): use `A2AW_API_KEY`, `A2AW_TOKEN`, `A2AW_ACCESS_TOKEN`, `A2AW_PASSWORD` or `A2AW_CLIENT_SECRET`, or pass `-` to read the value from standard input.
 
 **Is it enforced?** The probe calls `GetTask` with a random task ID three times: with no credentials, with wrong ones and with yours. An agent that answers the first two with anything but an authentication error does not enforce what its card declares.
 

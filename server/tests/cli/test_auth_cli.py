@@ -184,3 +184,32 @@ def test_send_with_skill_applies_the_skill_requirements(oauth_zoo, idp):
         app, ["send", oauth_zoo.base_url, "hold AI175", "--no-stream", "--skill", "hold", "--json"]
     )
     assert skill.exit_code == 4, skill.output
+
+
+def test_secrets_can_come_from_environment_or_stdin(bearer_zoo, oauth_zoo):
+    r = runner.invoke(
+        app,
+        ["auth", "set", bearer_zoo.base_url, "bearer", "--json"],
+        env={"A2AW_TOKEN": ZOO_SECRETS["token"]},
+    )
+    assert r.exit_code == 0, r.output
+    assert runner.invoke(app, ["send", bearer_zoo.base_url, "echo hi", "--json"]).exit_code == 0
+    r = runner.invoke(
+        app,
+        [
+            "auth",
+            "login",
+            oauth_zoo.base_url,
+            "oauth",
+            "--client-id",
+            IDP_CLIENT["id"],
+            "--client-secret",
+            "-",
+            "--scope",
+            "a2a:invoke",
+            "--json",
+        ],
+        input=IDP_CLIENT["secret"] + "\n",
+    )
+    assert r.exit_code == 0, r.output
+    assert IDP_CLIENT["secret"] not in r.stdout

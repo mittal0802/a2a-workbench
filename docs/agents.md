@@ -37,8 +37,8 @@ a2a-workbench tasks subscribe "My agent" <task-id> --json
 a2a-workbench send "My agent" "long job" --faults flaky_stream --json
 a2a-workbench faults presets --json
 a2a-workbench auth status "My agent" --json
-a2a-workbench auth set "My agent" bearer --token "$TOKEN"
-a2a-workbench auth login "My agent" oauth --client-id "$ID" --client-secret "$SECRET" --scope read --json
+A2AW_TOKEN="$TOKEN" a2a-workbench auth set "My agent" bearer
+A2AW_CLIENT_SECRET="$SECRET" a2a-workbench auth login "My agent" oauth --client-id "$ID" --scope read --json
 a2a-workbench auth login "My agent" oauthDevice --client-id "$ID"   # prints a code to enter
 a2a-workbench auth probe "My agent" --json
 ```

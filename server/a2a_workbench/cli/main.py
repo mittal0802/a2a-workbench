@@ -624,6 +624,13 @@ def faults_validate(path: Annotated[Path, typer.Argument(help="Profile JSON file
     typer.echo(f"valid: {len(injector.profile.rules)} rule(s)")
 
 
+def _secret(value: str | None) -> str | None:
+    """Return ``value``, or one line read from standard input when it is ``-``."""
+    if value == "-":
+        return sys.stdin.readline().rstrip("\r\n")
+    return value
+
+
 def _auth_failed(exc: Exception, as_json: bool) -> NoReturn:
     from a2a_workbench.core.auth.service import CredentialError
 
@@ -665,12 +672,22 @@ def auth_status(
 def auth_set(
     target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
     scheme: Annotated[str, typer.Argument(help="Security scheme name from the card.")],
-    api_key: Annotated[str | None, typer.Option(help="API key value.")] = None,
+    api_key: Annotated[
+        str | None, typer.Option(envvar="A2AW_API_KEY", help="API key value ('-' reads stdin).")
+    ] = None,
     username: Annotated[str | None, typer.Option()] = None,
-    password: Annotated[str | None, typer.Option()] = None,
-    token: Annotated[str | None, typer.Option(help="Bearer token.")] = None,
+    password: Annotated[
+        str | None, typer.Option(envvar="A2AW_PASSWORD", help="Password ('-' reads stdin).")
+    ] = None,
+    token: Annotated[
+        str | None, typer.Option(envvar="A2AW_TOKEN", help="Bearer token ('-' reads stdin).")
+    ] = None,
     access_token: Annotated[
-        str | None, typer.Option(help="OAuth access token you already have.")
+        str | None,
+        typer.Option(
+            envvar="A2AW_ACCESS_TOKEN",
+            help="OAuth access token you already have ('-' reads stdin).",
+        ),
     ] = None,
     cert: Annotated[Path | None, typer.Option(help="Client certificate PEM file.")] = None,
     key: Annotated[Path | None, typer.Option(help="Client private key PEM file.")] = None,
@@ -679,6 +696,10 @@ def auth_set(
 ) -> None:
     """Store a credential for one of the agent's security schemes."""
     from a2a_workbench.core.a2a_json import card_from_json
+
+    api_key, password, token, access_token = (
+        _secret(v) for v in (api_key, password, token, access_token)
+    )
 
     async def go() -> Any:
         from a2a_workbench.core.auth.service import credential_values
@@ -714,10 +735,16 @@ def auth_login(
     target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
     scheme: Annotated[str, typer.Argument(help="OAuth2 / OpenID Connect scheme name.")],
     client_id: Annotated[str, typer.Option(help="OAuth client id.")],
-    client_secret: Annotated[str | None, typer.Option(help="OAuth client secret.")] = None,
+    client_secret: Annotated[
+        str | None,
+        typer.Option(envvar="A2AW_CLIENT_SECRET", help="OAuth client secret ('-' reads stdin)."),
+    ] = None,
     scope: Annotated[list[str] | None, typer.Option("--scope", help="Scope to request.")] = None,
     username: Annotated[str | None, typer.Option(help="For the password flow.")] = None,
-    password: Annotated[str | None, typer.Option(help="For the password flow.")] = None,
+    password: Annotated[
+        str | None,
+        typer.Option(envvar="A2AW_PASSWORD", help="For the password flow ('-' reads stdin)."),
+    ] = None,
     auth_method: Annotated[
         str, typer.Option(help="client_secret_post or client_secret_basic.")
     ] = "client_secret_post",
@@ -732,6 +759,8 @@ def auth_login(
     """Sign in with the scheme's OAuth flow (direct, device code or browser)."""
     from a2a_workbench.cli.oauth_callback import CallbackServer
     from a2a_workbench.core.a2a_json import card_from_json
+
+    client_secret, password = _secret(client_secret), _secret(password)
 
     async def go() -> Any:
         async with Workbench.open(Settings()) as wb:
