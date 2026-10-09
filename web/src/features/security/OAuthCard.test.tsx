@@ -110,6 +110,21 @@ describe("OAuthCard browser and device flows", () => {
     expect(await screen.findByText(/signed in on the other device/i)).toBeInTheDocument();
   });
 
+  it("asks to sign in again when the token could not be renewed", () => {
+    setup({
+      ...scheme,
+      credential: {
+        scheme_name: "oauth2", kind: "oauth2", preview: "signed in · a2a:invoke", readable: true,
+        expires_at: "2020-01-01T00:00:00Z", updated_at: "2020-01-01T00:00:00Z",
+        renewal_error: "invalid_grant: unknown refresh token",
+      },
+    } as never);
+    expect(screen.getByText("Sign in again", { selector: ".state" })).toBeInTheDocument();
+    expect(screen.getByText(/session ended and could not be renewed/i)).toBeInTheDocument();
+    expect(screen.getByText(/invalid_grant: unknown refresh token/)).toBeInTheDocument();
+    expect(screen.queryByText("Signed in")).toBeNull();
+  });
+
   it("marks deprecated flows", () => {
     setup({ ...scheme, flows: ["password"], description: "" } as never);
     expect(screen.getByText(/deprecated flow/i)).toBeInTheDocument();

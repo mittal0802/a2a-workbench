@@ -22,6 +22,7 @@ class CredentialInfo(BaseModel):
     readable: bool
     expires_at: datetime | None
     updated_at: datetime
+    renewal_error: str | None = None
 
 
 def _tail(value: str) -> str:
@@ -120,8 +121,11 @@ class CredentialStore:
         """Describe every stored credential of an agent without revealing secrets."""
         infos = []
         for row in await self._rows(agent_id):
+            renewal_error = None
             try:
-                text, readable = preview(row.kind, self._vault.decrypt(row.encrypted)), True
+                secret = self._vault.decrypt(row.encrypted)
+                text, readable = preview(row.kind, secret), True
+                renewal_error = secret.get("renewal_error")
             except VaultError:
                 text, readable = "cannot be read — enter it again", False
             infos.append(
@@ -132,6 +136,7 @@ class CredentialStore:
                     readable=readable,
                     expires_at=row.expires_at,
                     updated_at=row.updated_at,
+                    renewal_error=renewal_error,
                 )
             )
         return infos

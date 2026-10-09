@@ -167,7 +167,7 @@ export type RecoveryData = {
   terminal: boolean;
 };
 
-export type CredentialInfo = { scheme_name: string; kind: string; preview: string; readable: boolean; expires_at: string | null; updated_at: string };
+export type CredentialInfo = { scheme_name: string; kind: string; preview: string; readable: boolean; expires_at: string | null; updated_at: string; renewal_error?: string | null };
 export type SchemeOverview = {
   name: string;
   type: "apiKey" | "http" | "oauth2" | "openIdConnect" | "mutualTLS" | "unknown";
@@ -186,6 +186,7 @@ export type SecurityOverview = {
   required_scopes?: Record<string, string[]>;
   active: string[];
   missing: string[];
+  expired?: string[];
 };
 export type CredentialInput = { kind: string } & Record<string, string>;
 

@@ -156,7 +156,9 @@ export function OAuthCard({
       <div className="card-h">
         <h3 style={{ fontSize: 14, fontWeight: 600 }}>{scheme.label}</h3>
         <span className="spacer" />
-        {cred?.readable ? (
+        {cred?.renewal_error ? (
+          <span className="state s-warn">Sign in again</span>
+        ) : cred?.readable ? (
           <span className="status">
             <i />
             Signed in
@@ -179,11 +181,17 @@ export function OAuthCard({
             </p>
           </details>
         )}
+        {cred?.renewal_error && (
+          <div className="note warn" role="status">
+            Your session ended and could not be renewed. Sign in again below.
+            <small className="mono">{cred.renewal_error}</small>
+          </div>
+        )}
         {cred && (
           <div className="row">
             <span>
               {cred.preview}
-              {expiresIn(cred.expires_at) && <span className="no"> · {expiresIn(cred.expires_at)}</span>}
+              {!cred.renewal_error && expiresIn(cred.expires_at) && <span className="no"> · {expiresIn(cred.expires_at)}</span>}
             </span>
             <button className="btn ghost" style={{ color: "var(--red)" }} onClick={() => signOut.mutate()}>
               Sign out

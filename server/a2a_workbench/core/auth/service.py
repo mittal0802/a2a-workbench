@@ -1,5 +1,6 @@
 """Building the authentication plan for a call to a registered agent."""
 
+import asyncio
 from typing import Any, Literal
 
 from a2a.types import AgentCard, SecurityScheme
@@ -53,6 +54,8 @@ class SecurityOverview(BaseModel):
     required_scopes: dict[str, list[str]] = {}
     active: list[str]
     missing: list[str]
+    expired: list[str] = []
+    """Schemes whose OAuth token expired and could not be renewed: sign in again."""
 
 
 def _label(scheme: SecurityScheme) -> str:
@@ -136,6 +139,7 @@ class AuthService:
         self.credentials = credentials
         self._sink = sink
         self._pending: dict[str, dict[str, Any]] = {}
+        self._locks: dict[tuple[str, str], asyncio.Lock] = {}
 
     def _remember(self, key: str, data: dict[str, Any]) -> None:
         import time
@@ -388,16 +392,33 @@ class AuthService:
         """Return the auth plan for calling ``agent_id`` (optionally for one skill).
 
         OAuth tokens that expire within 30 seconds are renewed first (refresh
-        token, or a new client credentials grant); a failed renewal keeps the
-        old token so the agent's own answer is shown.
+        token, or a new client credentials grant), one renewal at a time per
+        scheme so rotating refresh tokens are used once. A failed renewal is
+        recorded on the credential (``renewal_error``) and not retried until
+        the user signs in again; the old token is still sent so the agent's
+        own answer is shown.
         """
         credentials = await self.credentials.all(agent_id)
         for name, cred in list(credentials.items()):
-            if cred.get("kind") == "oauth2" and self._expiring(cred):
-                renewed = await self._renew(agent_id, name, cred)
+            if not self._needs_renewal(cred):
+                continue
+            async with self._locks.setdefault((agent_id, name), asyncio.Lock()):
+                current = await self.credentials.get(agent_id, name)
+                if current is None:
+                    continue
+                current = {"kind": "oauth2", **current}
+                if not self._needs_renewal(current):
+                    credentials[name] = current
+                    continue
+                renewed = await self._renew(agent_id, name, current)
                 if renewed is not None:
                     credentials[name] = {"kind": "oauth2", **renewed}
         return build_auth_plan(card, credentials, skill_id=skill_id)
+
+    def _needs_renewal(self, cred: dict[str, Any]) -> bool:
+        return (
+            cred.get("kind") == "oauth2" and self._expiring(cred) and not cred.get("renewal_error")
+        )
 
     @staticmethod
     def _expiring(cred: dict[str, Any]) -> bool:
@@ -433,9 +454,14 @@ class AuthService:
                 )
             else:
                 return None
-        except oauth.OAuthError:
+        except oauth.OAuthError as exc:
+            failed = {k: v for k, v in cred.items() if k != "kind"}
+            failed["renewal_error"] = str(exc)
+            await self.credentials.put(
+                agent_id, scheme, "oauth2", failed, expires_at=_dt(cred.get("expires_at"))
+            )
             return None
-        secret = {k: v for k, v in cred.items() if k != "kind"}
+        secret = {k: v for k, v in cred.items() if k not in ("kind", "renewal_error")}
         secret.update(tokens.model_dump())
         await self.credentials.put(
             agent_id, scheme, "oauth2", secret, expires_at=_dt(tokens.expires_at)
@@ -639,10 +665,19 @@ class AuthService:
             )
         alternatives = requirement_alternatives(card)
         plan = await self.plan(agent_id, card)
+        stored = await self.credentials.all(agent_id)
+        expired = sorted(
+            name
+            for name, cred in stored.items()
+            if cred.get("kind") == "oauth2" and cred.get("renewal_error")
+        )
+        infos = {i.scheme_name: i for i in await self.credentials.list(agent_id)}
+        for s in schemes:
+            s.credential = infos.get(s.name)
         status: Literal["not_required", "signed_in", "sign_in_needed"]
         if not alternatives:
             status = "not_required"
-        elif plan.missing or not plan.scheme_names:
+        elif plan.missing or not plan.scheme_names or set(expired) & set(plan.scheme_names):
             status = "sign_in_needed"
         else:
             status = "signed_in"
@@ -656,6 +691,7 @@ class AuthService:
             },
             active=sorted(plan.scheme_names),
             missing=plan.missing,
+            expired=expired,
         )
 
     async def set_credential(

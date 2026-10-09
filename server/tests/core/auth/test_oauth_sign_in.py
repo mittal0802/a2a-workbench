@@ -167,3 +167,37 @@ async def test_skill_scope_enforced(wb, oauth_zoo):
         )
     ]
     assert ok[-1].data["state"] == "completed"
+
+
+async def _signed_in(wb, oauth_zoo):
+    agent = await wb.agents.add(oauth_zoo.base_url)
+    await wb.auth.sign_in(
+        agent.id,
+        "oauth",
+        flow="client_credentials",
+        client_id=IDP_CLIENT["id"],
+        client_secret=IDP_CLIENT["secret"],
+        scopes=["a2a:invoke"],
+        card=_card(agent),
+    )
+    return agent
+
+
+async def test_concurrent_renewals_share_one_refresh(wb, oauth_zoo):
+    agent = await _signed_in(wb, oauth_zoo)
+    first = (await wb.credentials.get(agent.id, "oauth"))["access_token"]
+    await asyncio.sleep(2.2)
+    plans = await asyncio.gather(*(wb.auth.plan(agent.id, _card(agent)) for _ in range(4)))
+    headers = {p.headers["Authorization"] for p in plans}
+    assert len(headers) == 1 and headers != {f"Bearer {first}"}
+
+
+async def test_failed_renewal_asks_to_sign_in_again(wb, oauth_zoo, idp):
+    agent = await _signed_in(wb, oauth_zoo)
+    idp.idp.refresh_tokens.clear()
+    await asyncio.sleep(2.2)
+    overview = await wb.auth.overview(agent.id, _card(agent))
+    assert overview.status == "sign_in_needed"
+    info = next(s.credential for s in overview.schemes if s.name == "oauth")
+    assert info.renewal_error and "invalid_grant" in info.renewal_error
+    assert "oauth" in overview.expired
