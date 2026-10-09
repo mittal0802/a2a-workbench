@@ -3,10 +3,12 @@
 import base64
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote, quote_plus
 
 from a2a.types import AgentCard
 
 from a2a_workbench.core.auth.requirements import choose_requirement, requirement_alternatives
+from a2a_workbench.core.connection.recorder import REDACTED
 
 _KIND_FOR = {
     "api_key_security_scheme": {"api_key"},
@@ -40,6 +42,50 @@ class AuthPlan:
     tls: TlsMaterial | None = None
     scheme_names: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+
+    def secrets(self) -> set[str]:
+        """Return every credential value this plan sends, raw and URL-encoded.
+
+        Covers query values, header values, the token after an ``Authorization``
+        scheme word, and each cookie value. Values shorter than four characters
+        are left out so that masking does not mangle ordinary text.
+        """
+        raw: set[str] = set(self.query.values())
+        for name, value in self.headers.items():
+            raw.add(value)
+            if " " in value:
+                raw.add(value.split(" ", 1)[1])
+            if name.lower() == "cookie":
+                for item in value.split(";"):
+                    if "=" in item:
+                        raw.add(item.split("=", 1)[1].strip())
+        out: set[str] = set()
+        for value in raw:
+            if len(value) >= 4:
+                out |= {value, quote(value, safe=""), quote_plus(value, safe="")}
+        return out
+
+    def scrub(self, data: Any) -> Any:
+        """Return ``data`` with every credential value in its strings masked.
+
+        Walks dicts and lists; non-string leaves are returned unchanged.
+        """
+        secrets = sorted(self.secrets(), key=len, reverse=True)
+        if not secrets:
+            return data
+
+        def walk(value: Any) -> Any:
+            if isinstance(value, str):
+                for secret in secrets:
+                    value = value.replace(secret, REDACTED)
+                return value
+            if isinstance(value, dict):
+                return {k: walk(v) for k, v in value.items()}
+            if isinstance(value, list | tuple):
+                return [walk(v) for v in value]
+            return value
+
+        return walk(data)
 
 
 def _usable(card: AgentCard, credentials: dict[str, dict[str, Any]]) -> set[str]:

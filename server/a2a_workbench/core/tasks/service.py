@@ -118,7 +118,7 @@ class TaskService:
             except AgentCallError:
                 raise
             except Exception as exc:
-                raise AgentCallError(classify_error(exc)) from exc
+                raise AgentCallError(plan.scrub(classify_error(exc))) from exc
 
     async def get(
         self,

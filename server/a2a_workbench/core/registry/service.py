@@ -319,6 +319,7 @@ class AgentService:
                     "message": "This agent's card does not declare an extended agent card.",
                 }
             )
+        plan = None
         try:
             iface = select_interface(card, interface_url)
             plan = await self._auth.plan(agent_id, card) if self._auth and agent_id else None
@@ -326,7 +327,8 @@ class AgentService:
                 card, iface, self._sink, agent_id=agent_id, auth=plan
             )
         except Exception as exc:
-            raise AgentCallError(classify_error(exc)) from exc
+            classified = classify_error(exc)
+            raise AgentCallError(plan.scrub(classified) if plan else classified) from exc
         extended_json = to_json(extended)
         return ExtendedCardOut(
             card=extended_json, diff=card_diff(card_json, extended_json), exchange_ids=exchange_ids

@@ -52,7 +52,7 @@ async def _attempt(
                 return "rejected"
             if category == "protocol":
                 return "accepted"
-            return f"error: {exc}"
+            return plan.scrub(f"error: {exc}")
     return "accepted"
 
 

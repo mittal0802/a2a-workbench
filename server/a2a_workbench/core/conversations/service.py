@@ -284,14 +284,16 @@ class ConversationService:
         *,
         task_id: str | None = None,
         exchange_id: str | None = None,
+        plan: AuthPlan | None = None,
     ) -> TimelineEvent:
+        classified = classify_error(exc)
         return await self._emit(
             TimelineEvent(
                 conversation_id=conversation_id,
                 kind="error",
                 task_id=task_id,
                 exchange_id=exchange_id,
-                data=classify_error(exc),
+                data=plan.scrub(classified) if plan else classified,
             )
         )
 
@@ -302,8 +304,11 @@ class ConversationService:
         task_id: str | None,
         last_state: str | None,
         exchange_id: str | None,
+        plan: AuthPlan | None = None,
     ) -> TimelineEvent:
         classified = classify_error(exc)
+        if plan is not None:
+            classified = plan.scrub(classified)
         open_task = last_state not in TERMINAL_STATES | INTERRUPTED_STATES
         if classified["category"] == "transport" and task_id and last_state and open_task:
             return await self._emit(
@@ -395,6 +400,7 @@ class ConversationService:
         with recording_scope(
             "subscribe_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            plan = AuthPlan()
             try:
                 plan = await self._plan(agent.id, card)
                 iface = select_interface(card, agent.selected_interface_url)
@@ -424,7 +430,7 @@ class ConversationService:
                         yield event
             except Exception as exc:
                 yield await self._failure(
-                    conversation_id, exc, task_id, state, _last_exchange(scope)
+                    conversation_id, exc, task_id, state, _last_exchange(scope), plan=plan
                 )
                 return
             finally:
@@ -462,6 +468,7 @@ class ConversationService:
         with recording_scope(
             "get_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            plan = AuthPlan()
             try:
                 plan = await self._plan(agent.id, card)
                 iface = select_interface(card, agent.selected_interface_url)
@@ -479,7 +486,7 @@ class ConversationService:
                     )
             except Exception as exc:
                 yield await self._failure(
-                    conversation_id, exc, task_id, conv.task_state, _last_exchange(scope)
+                    conversation_id, exc, task_id, conv.task_state, _last_exchange(scope), plan=plan
                 )
                 return
         event = await self._emit(
@@ -562,6 +569,7 @@ class ConversationService:
         ) as scope:
             seen_task, seen_state, received = task_id, None, 0
             self._open_streams[conversation_id] += 1
+            plan = AuthPlan()
             try:
                 plan = await self._plan(agent.id, card, options.skill_id)
                 iface = select_interface(
@@ -595,7 +603,7 @@ class ConversationService:
                         yield event
             except Exception as exc:
                 yield await self._failure(
-                    conversation_id, exc, seen_task, seen_state, _last_exchange(scope)
+                    conversation_id, exc, seen_task, seen_state, _last_exchange(scope), plan=plan
                 )
                 return
             finally:
@@ -642,6 +650,7 @@ class ConversationService:
         with recording_scope(
             "cancel_task", agent_id=agent.id, conversation_id=conversation_id
         ) as scope:
+            plan = AuthPlan()
             try:
                 plan = await self._plan(agent.id, card)
                 iface = select_interface(card, agent.selected_interface_url)
@@ -665,4 +674,5 @@ class ConversationService:
                     exc,
                     task_id=conv.task_id,
                     exchange_id=_last_exchange(scope),
+                    plan=plan,
                 )

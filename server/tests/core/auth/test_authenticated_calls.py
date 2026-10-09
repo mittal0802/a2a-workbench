@@ -118,3 +118,45 @@ async def test_api_key_in_a_custom_header_is_redacted(wb, binding):
             r["request_headers"]["ocp-apim-subscription-key"] == "••••" for r in sent
         )
         assert ZOO_SECRETS["api_key"] not in json.dumps(records)
+
+
+async def test_query_api_key_never_appears_in_errors(wb):
+    leaked = "MY-SECRET-KEY-123"
+    async with ZooServer(auth="apikey-query", grpc=False) as zoo:
+        agent = await wb.agents.add(zoo.base_url)
+        await wb.credentials.put(agent.id, "apiKeyQuery", "api_key", {"value": leaked})
+        conv = await wb.conversations.create(agent.id)
+        events = await _send(wb, conv.id, "echo q", stream=False)
+        assert events[-1].kind == "error" and events[-1].data["category"] == "auth"
+        dump = json.dumps([e.model_dump(mode="json") for e in events])
+        with pytest.raises(Exception) as task_error:
+            await wb.tasks.get(agent.id, "no-such-task")
+        dump += json.dumps(getattr(task_error.value, "classified", str(task_error.value)))
+        from a2a_workbench.core.a2a_json import card_from_json
+
+        card = card_from_json((await wb.agents.row(agent.id)).card)
+        dump += json.dumps([r.model_dump() for r in await wb.auth.probe(agent.id, card)])
+        dump += json.dumps(
+            [await wb.exchanges.get(e["id"]) for e in await wb.exchanges.list(agent_id=agent.id)]
+        )
+        assert "api_key=" in dump
+        assert leaked not in dump
+
+
+def test_scrub_masks_every_form_of_a_secret():
+    from a2a_workbench.core.auth.apply import AuthPlan
+
+    plan = AuthPlan(
+        headers={"Authorization": "Bearer tok-abcdef", "Cookie": "a=1; zoo_session=cookie-secret"},
+        query={"api_key": "k e/y+123"},
+    )
+    data = {
+        "message": "for url 'http://x/a2a?api_key=k+e%2Fy%2B123' Bearer tok-abcdef",
+        "nested": ["cookie-secret", {"m": "k e/y+123"}],
+        "code": 401,
+    }
+    out = plan.scrub(data)
+    text = json.dumps(out)
+    for secret in ("tok-abcdef", "cookie-secret", "k e/y+123", "k+e%2Fy%2B123"):
+        assert secret not in text
+    assert out["code"] == 401 and "••••" in out["message"]
