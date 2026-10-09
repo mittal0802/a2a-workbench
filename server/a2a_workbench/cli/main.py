@@ -112,6 +112,7 @@ def serve(
 
     settings = Settings()
     bind_host, bind_port = host or settings.host, port or settings.port
+    settings.host, settings.port = bind_host, bind_port
     if open_browser:
         webbrowser.open(f"http://{bind_host}:{bind_port}")
     uvicorn.run(
