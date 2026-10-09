@@ -108,9 +108,15 @@ class OpenAIAdapter:
 
 
 def _detail(exc: Exception) -> str:
+    status = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    where = ""
+    if status is not None and response is not None:
+        where = f" (HTTP {status} from {response.request.url})"
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
-        message = body.get("message") or (body.get("error") or {}).get("message")
+        err = body.get("error")
+        message = err.get("message") if isinstance(err, dict) else body.get("message")
         if message:
-            return f"OpenAI: {message}"
-    return f"OpenAI: {type(exc).__name__}"
+            return f"OpenAI: {message}{where}"
+    return f"OpenAI: {type(exc).__name__}{where}"

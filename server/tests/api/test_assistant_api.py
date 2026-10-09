@@ -103,7 +103,9 @@ def test_pass_through_reply_and_stop(c, llm, zoo):
     s = _setup(c, llm, zoo, response_mode="pass_through")
     c.post(f"/api/assistant/sessions/{s['id']}/messages", json={"text": "ask"})
     body = _wait(c, s["id"])
-    assert body["session"]["status"] == "awaiting_user", [(st["kind"], st["data"]) for st in body["steps"]]
+    assert body["session"]["status"] == "awaiting_user", [
+        (st["kind"], st["data"]) for st in body["steps"]
+    ]
     assert body["session"]["pending"]["question"] == "Which option should I pick: A or B?"
     assert c.post(f"/api/assistant/sessions/{s['id']}/stop").status_code == 204
     assert _wait(c, s["id"], status=("stopped",))["steps"][-1]["data"]["limit"] == "stopped"

@@ -225,3 +225,14 @@ async def test_auth_error_is_llm_error_without_the_key(canned, provider, suffix)
             "SYS", HISTORY, TOOLS
         )
     assert info.value.category == "auth" and "sk-zzz-secret" not in str(info.value)
+
+
+@pytest.mark.parametrize("provider,suffix", [("anthropic", ""), ("openai", "/v1")])
+async def test_wrong_endpoint_names_the_status_and_url(canned, provider, suffix):
+    canned.replies.append((404, {"detail": "Not Found"}))
+    with pytest.raises(LLMError) as info:
+        await adapter_for(provider, "m", "sk-zzz-secret", base_url=canned.url + suffix).complete(
+            "SYS", HISTORY, TOOLS
+        )
+    assert "404" in str(info.value) and canned.url in str(info.value)
+    assert info.value.category == "provider" and "sk-zzz-secret" not in str(info.value)

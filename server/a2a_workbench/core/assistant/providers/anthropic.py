@@ -1,6 +1,5 @@
 """Anthropic Messages API adapter."""
 
-import json
 from typing import Any
 
 import anthropic
@@ -95,10 +94,15 @@ class AnthropicAdapter:
 
 
 def _detail(exc: Exception) -> str:
+    status = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    where = ""
+    if status is not None and response is not None:
+        where = f" (HTTP {status} from {response.request.url})"
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         err = body.get("error")
-        if isinstance(err, dict) and err.get("message"):
-            return f"Anthropic: {err['message']}"
-        return f"Anthropic: {json.dumps(body)[:300]}"
-    return f"Anthropic: {type(exc).__name__}"
+        message = err.get("message") if isinstance(err, dict) else body.get("message")
+        if message:
+            return f"Anthropic: {message}{where}"
+    return f"Anthropic: {type(exc).__name__}{where}"

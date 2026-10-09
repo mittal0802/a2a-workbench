@@ -308,7 +308,7 @@ export function AssistantPage() {
           </Link>
         ))}
       </aside>
-      <ProviderSettings open={settingsOpen} onOpenChange={setSettingsOpen} provider={activeProvider} info={providerInfo} />
+      <ProviderSettings key={activeProvider} open={settingsOpen} onOpenChange={setSettingsOpen} provider={activeProvider} info={providerInfo} />
     </div>
   );
 }

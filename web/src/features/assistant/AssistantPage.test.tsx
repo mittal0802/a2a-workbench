@@ -171,4 +171,21 @@ describe("AssistantPage", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: /save key/i }));
     expect(put).toHaveBeenCalledWith("openai", { api_key: "sk-new", base_url: "http://llm/v1" });
   });
+  it("sends a base URL only for OpenAI-compatible providers", async () => {
+    vi.spyOn(api, "listAssistantSessions").mockResolvedValue([] as never);
+    const put = vi.spyOn(api, "putAssistantProvider").mockResolvedValue({} as never);
+    renderAt("/assistant");
+    await userEvent.selectOptions(await screen.findByLabelText(/provider/i), "openai");
+    await userEvent.click(screen.getByRole("button", { name: /model/i }));
+    let dialog = await screen.findByRole("dialog");
+    await userEvent.clear(within(dialog).getByLabelText(/base url/i));
+    await userEvent.type(within(dialog).getByLabelText(/base url/i), "http://other/v1");
+    await userEvent.click(within(dialog).getByRole("button", { name: /close/i }));
+    await userEvent.selectOptions(screen.getByLabelText(/provider/i), "anthropic");
+    await userEvent.click(screen.getByRole("button", { name: /model/i }));
+    dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText(/api key/i), "sk-ant");
+    await userEvent.click(within(dialog).getByRole("button", { name: /save key/i }));
+    expect(put).toHaveBeenLastCalledWith("anthropic", { api_key: "sk-ant", base_url: null });
+  });
 });

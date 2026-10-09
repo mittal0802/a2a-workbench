@@ -21,13 +21,14 @@ export function ProviderSettings({
   const qc = useQueryClient();
   const [key, setKey] = useState("");
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
-  const url = baseUrl ?? info?.base_url ?? "";
+  const compatible = provider === "openai";
+  const url = compatible ? (baseUrl ?? info?.base_url ?? "") : "";
   const done = () => {
     setKey("");
     qc.invalidateQueries({ queryKey: ["assistant-providers"] });
   };
   const save = useMutation({
-    mutationFn: () => api.putAssistantProvider(provider, { api_key: key, base_url: url || null }),
+    mutationFn: () => api.putAssistantProvider(provider, { api_key: key, base_url: compatible && url ? url : null }),
     onSuccess: done,
   });
   const remove = useMutation({ mutationFn: () => api.deleteAssistantProvider(provider), onSuccess: done });
