@@ -542,11 +542,12 @@ class ConversationService:
             yield await self._error(conversation_id, exc)
             return
         message = Message(message_id=uuid.uuid4().hex, role=Role.ROLE_USER, parts=built)
-        context_id = options.context_id or conv.context_id
+        inherit = options.inherit_ids
+        context_id = options.context_id or (conv.context_id if inherit else None)
         if context_id:
             message.context_id = context_id
         task_id = options.task_id or (
-            conv.task_id if conv.task_state in INTERRUPTED_STATES else None
+            conv.task_id if inherit and conv.task_state in INTERRUPTED_STATES else None
         )
         if task_id:
             message.task_id = task_id

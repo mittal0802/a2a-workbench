@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -27,7 +28,9 @@ from a2a.types import (
     AgentInterface,
     AgentProvider,
     AgentSkill,
+    Message,
     Part,
+    Role,
     SecurityRequirement,
     StringList,
     Task,
@@ -80,7 +83,8 @@ class ZooExecutor(AgentExecutor):
     sends a four-chunk artifact; ``ask`` enters ``input_required`` and completes
     on the reply; ``message`` answers with a direct Message; ``data`` and
     ``file`` return structured and file parts; ``fail`` and ``reject`` end in
-    those states; ``slow <seconds>`` works for that long; ``long`` streams ten
+    those states; ``slow <seconds>`` works for that long; ``note`` completes with its
+    output only in the final status message (no artifact); ``long`` streams ten
     artifact chunks 150 ms apart; ``stall <seconds>`` goes silent after
     starting work; ``auth`` enters
     ``auth_required``; ``inspect`` returns a data artifact describing the
@@ -97,7 +101,12 @@ class ZooExecutor(AgentExecutor):
 
         if word == "message" and task is None:
             await event_queue.enqueue_event(
-                updater.new_agent_message([Part(text=f"Direct reply: {rest or 'hello'}")])
+                Message(
+                    message_id=uuid.uuid4().hex,
+                    role=Role.ROLE_AGENT,
+                    context_id=context.context_id or "",
+                    parts=[Part(text=f"Direct reply: {rest or 'hello'}")],
+                )
             )
             return
 
@@ -145,6 +154,8 @@ class ZooExecutor(AgentExecutor):
                     last_chunk=i == 9,
                 )
             await updater.complete()
+        elif word == "note":
+            await updater.complete(updater.new_agent_message([Part(text=f"Noted: {rest}")]))
         elif word == "stall":
             await asyncio.sleep(float(rest or "30"))
             await updater.complete()
