@@ -9,6 +9,7 @@ from a2a_workbench.fixtures.runner import ZooServer
 
 CREDS = {
     "apikey-header": [("apiKey", "api_key", {"value": ZOO_SECRETS["api_key"]})],
+    "apikey-custom": [("apiKeyCustom", "api_key", {"value": ZOO_SECRETS["api_key"]})],
     "apikey-query": [("apiKeyQuery", "api_key", {"value": ZOO_SECRETS["api_key"]})],
     "apikey-cookie": [("apiKeyCookie", "api_key", {"value": ZOO_SECRETS["api_key"]})],
     "basic": [
@@ -95,3 +96,25 @@ async def test_tasks_and_extended_card_are_authenticated(wb):
         assert any(
             d["path"] == "skills[visa]" for d in (await wb.agents.get_extended_card(agent.id)).diff
         )
+
+
+@pytest.mark.parametrize("binding", ["JSONRPC", "HTTP+JSON", "GRPC"])
+async def test_api_key_in_a_custom_header_is_redacted(wb, binding):
+    async with ZooServer(auth="apikey-custom") as zoo:
+        agent = await wb.agents.add(zoo.base_url)
+        iface = next(i for i in agent.interfaces if i.binding == binding)
+        await wb.agents.set_interface(agent.id, iface.url)
+        await wb.credentials.put(
+            agent.id, "apiKeyCustom", "api_key", {"value": ZOO_SECRETS["api_key"]}
+        )
+        conv = await wb.conversations.create(agent.id)
+        events = await _send(wb, conv.id, "echo hi", stream=False)
+        assert events[-1].data.get("state") == "completed"
+        records = [
+            await wb.exchanges.get(e["id"]) for e in await wb.exchanges.list(agent_id=agent.id)
+        ]
+        sent = [r for r in records if "ocp-apim-subscription-key" in r["request_headers"]]
+        assert sent and all(
+            r["request_headers"]["ocp-apim-subscription-key"] == "••••" for r in sent
+        )
+        assert ZOO_SECRETS["api_key"] not in json.dumps(records)

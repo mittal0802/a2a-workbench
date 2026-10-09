@@ -75,7 +75,8 @@ async def open_client(
     ``faults`` injects failures beneath the SDK; pass the same injector to
     several clients to share its rule state. ``auth`` adds the plan's query
     parameters and TLS client certificate to the transports; its headers are
-    sent per call through ``ClientCallContext.service_parameters``. Closing the
+    sent per call through ``ClientCallContext.service_parameters`` and masked
+    in recordings. Closing the
     client closes its connections.
 
     Raises:
@@ -84,6 +85,7 @@ async def open_client(
     if iface.protocol_binding not in SUPPORTED_BINDINGS:
         raise UnsupportedBindingError(f"{iface.protocol_binding} is not supported yet")
     injector = as_injector(faults)
+    sensitive = frozenset(k.lower() for k in auth.headers) if auth else frozenset()
     config = ClientConfig(
         streaming=streaming,
         httpx_client=build_http_client(
@@ -92,9 +94,10 @@ async def open_client(
             binding=iface.protocol_binding,
             query=auth.query if auth else None,
             tls=auth.tls if auth else None,
+            sensitive_headers=sensitive,
         ),
         grpc_channel_factory=build_grpc_channel_factory(
-            sink, faults=injector, tls=auth.tls if auth else None
+            sink, faults=injector, tls=auth.tls if auth else None, sensitive_headers=sensitive
         ),
         supported_protocol_bindings=[iface.protocol_binding],
     )

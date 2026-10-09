@@ -163,10 +163,14 @@ def current_operation() -> str | None:
     return scope.operation if scope else None
 
 
-def redact_headers(headers: httpx.Headers) -> dict[str, str]:
-    """Return headers as a lowercase dict with credential-bearing values masked."""
+def redact_headers(headers: httpx.Headers, extra: frozenset[str] = frozenset()) -> dict[str, str]:
+    """Return headers as a lowercase dict with credential-bearing values masked.
+
+    ``extra`` holds further lowercase header names to mask, such as API-key
+    headers named by an agent card.
+    """
     return {
-        k.lower(): (REDACTED if k.lower() in SENSITIVE_HEADERS else v)
+        k.lower(): (REDACTED if k.lower() in SENSITIVE_HEADERS or k.lower() in extra else v)
         for k, v in headers.multi_items()
     }
 
@@ -291,11 +295,13 @@ class RecordingTransport(httpx.AsyncBaseTransport):
         *,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
         sensitive_query: frozenset[str] = frozenset(),
+        sensitive_headers: frozenset[str] = frozenset(),
     ) -> None:
         self._sink = sink
         self._inner = inner or httpx.AsyncHTTPTransport()
         self._max = max_body_bytes
         self._sensitive_query = sensitive_query
+        self._sensitive_headers = frozenset(h.lower() for h in sensitive_headers)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         """Forward ``request`` to the inner transport and record the exchange."""
@@ -306,7 +312,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             http_method=request.method,
             url=redact_url(str(request.url), self._sensitive_query),
             started_at=datetime.now(UTC),
-            request_headers=redact_headers(request.headers),
+            request_headers=redact_headers(request.headers, self._sensitive_headers),
             request_body=redact_body(
                 self._request_body(request), scope.redact_fields if scope else frozenset()
             ),
@@ -326,7 +332,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             raise
         exchange.fault = request.extensions.get("a2aw_fault")
         exchange.status = response.status_code
-        exchange.response_headers = redact_headers(response.headers)
+        exchange.response_headers = redact_headers(response.headers, self._sensitive_headers)
         exchange.complete = False
         await self._sink(exchange)
         stream = _RecordingStream(

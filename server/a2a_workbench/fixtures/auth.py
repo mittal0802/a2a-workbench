@@ -27,6 +27,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 ZooAuth = Literal[
     "none",
     "apikey-header",
+    "apikey-custom",
     "apikey-query",
     "apikey-cookie",
     "basic",
@@ -75,6 +76,9 @@ def _cookies(headers: dict[str, str]) -> dict[str, str]:
 
 CHECKS: dict[str, Check] = {
     "apikey-header": lambda h, q, c: _key_header_ok(h),
+    "apikey-custom": lambda h, q, c: _eq(
+        h.get("ocp-apim-subscription-key"), ZOO_SECRETS["api_key"]
+    ),
     "apikey-query": lambda h, q, c: _eq(q.get("api_key"), ZOO_SECRETS["api_key"]),
     "apikey-cookie": lambda h, q, c: _eq(c.get("zoo_session"), ZOO_SECRETS["api_key"]),
     "basic": lambda h, q, c: _basic_ok(h),
@@ -195,6 +199,11 @@ def security_for(
         "apiKey": SecurityScheme(
             api_key_security_scheme=APIKeySecurityScheme(location="header", name="X-API-Key")
         ),
+        "apiKeyCustom": SecurityScheme(
+            api_key_security_scheme=APIKeySecurityScheme(
+                location="header", name="Ocp-Apim-Subscription-Key"
+            )
+        ),
         "apiKeyQuery": SecurityScheme(
             api_key_security_scheme=APIKeySecurityScheme(location="query", name="api_key")
         ),
@@ -211,6 +220,7 @@ def security_for(
     }
     used = {
         "apikey-header": ["apiKey"],
+        "apikey-custom": ["apiKeyCustom"],
         "apikey-query": ["apiKeyQuery"],
         "apikey-cookie": ["apiKeyCookie"],
         "basic": ["basic"],

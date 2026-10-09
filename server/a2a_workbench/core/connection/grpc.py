@@ -47,11 +47,11 @@ def _method_name(details: Any) -> str:
     return method.decode() if isinstance(method, bytes) else str(method)
 
 
-def _metadata(details: Any) -> dict[str, str]:
+def _metadata(details: Any, extra: frozenset[str] = frozenset()) -> dict[str, str]:
     out: dict[str, str] = {}
     for key, value in details.metadata or ():
         k = key.lower()
-        out[k] = REDACTED if k in SENSITIVE_HEADERS else str(value)
+        out[k] = REDACTED if k in SENSITIVE_HEADERS or k in extra else str(value)
     return out
 
 
@@ -67,7 +67,10 @@ class RecordingGrpcInterceptor:
     and streamed messages become frames.
     """
 
-    def __init__(self, sink: ExchangeSink, target: str) -> None:
+    def __init__(
+        self, sink: ExchangeSink, target: str, sensitive_headers: frozenset[str] = frozenset()
+    ) -> None:
+        self._sensitive = frozenset(h.lower() for h in sensitive_headers)
         self._sink = sink
         self._target = target
 
@@ -79,7 +82,7 @@ class RecordingGrpcInterceptor:
             http_method="GRPC",
             url=f"grpc://{self._target}{_method_name(details)}",
             started_at=datetime.now(UTC),
-            request_headers=_metadata(details),
+            request_headers=_metadata(details, self._sensitive),
             request_body=MessageToJson(request),
             agent_id=scope.agent_id if scope else None,
             conversation_id=scope.conversation_id if scope else None,
@@ -156,6 +159,7 @@ def build_grpc_channel_factory(
     *,
     faults: FaultProfile | FaultInjector | None = None,
     tls: TlsMaterial | None = None,
+    sensitive_headers: frozenset[str] = frozenset(),
 ) -> Callable[[str], grpc.aio.Channel]:
     """Return a factory creating recorded (and optionally fault-injected) channels.
 
@@ -165,7 +169,9 @@ def build_grpc_channel_factory(
 
     def factory(url: str) -> grpc.aio.Channel:
         target, secure = parse_grpc_target(url)
-        interceptors = as_channel_interceptors(RecordingGrpcInterceptor(sink, target))
+        interceptors = as_channel_interceptors(
+            RecordingGrpcInterceptor(sink, target, sensitive_headers)
+        )
         if injector is not None:
             interceptors += as_channel_interceptors(FaultGrpcInterceptor(injector))
         if tls is not None:
