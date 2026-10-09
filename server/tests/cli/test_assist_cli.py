@@ -141,3 +141,34 @@ def test_cli_assist_human_output(llm, zoo):
     )
     assert r.exit_code == 0, r.output
     assert "Zoo agent" in r.output and "Done: echo hi" in r.output
+
+
+def test_cli_session_keeps_the_chat_mode_unless_given(llm, zoo):
+    runner.invoke(
+        app,
+        ["providers", "set", "openai", "--base-url", llm.base_url],
+        env={"A2AW_LLM_API_KEY": "sk-cli-secret-4321"},
+    )
+    r = runner.invoke(
+        app,
+        [
+            "assist",
+            "ask",
+            "--agents",
+            zoo.base_url,
+            "--provider",
+            "openai",
+            "--model",
+            "scripted",
+            "--response-mode",
+            "pass-through",
+            "--json",
+        ],
+    )
+    sid = _lines(r.stdout)[-1]["session"]["id"]
+    r = runner.invoke(app, ["assist", "A", "--session", sid, "--json"])
+    assert _lines(r.stdout)[-1]["session"]["response_mode"] == "pass_through"
+    r = runner.invoke(
+        app, ["assist", "ask", "--session", sid, "--response-mode", "rewrite", "--json"]
+    )
+    assert _lines(r.stdout)[-1]["session"]["response_mode"] == "rewrite"

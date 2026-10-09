@@ -932,11 +932,12 @@ def assist(
     provider: Annotated[str, typer.Option(help="anthropic, openai or gemini.")] = "anthropic",
     model: Annotated[str | None, typer.Option(help="Model name (Anthropic has a default).")] = None,
     response_mode: Annotated[
-        str,
+        str | None,
         typer.Option(
-            help="rewrite (the Assistant answers) or pass-through (agents speak directly)."
+            help="rewrite (the Assistant answers) or pass-through (agents speak directly); "
+            "default rewrite for a new chat, unchanged with --session."
         ),
-    ] = "rewrite",
+    ] = None,
     session: Annotated[str | None, typer.Option(help="Continue this Assistant chat.")] = None,
     max_steps: Annotated[int, typer.Option(min=1, help="Model turns per message.")] = 12,
     call_timeout: Annotated[float, typer.Option(help="Seconds per agent call.")] = 120,
@@ -949,7 +950,7 @@ def assist(
     """
     from a2a_workbench.core.assistant.service import Limits, SessionIn
 
-    mode = response_mode.replace("-", "_")
+    mode = (response_mode or "rewrite").replace("-", "_")
     if mode not in ("rewrite", "pass_through"):
         _fail("workbench", "response mode is rewrite or pass-through", as_json, ExitCode.USAGE)
     if not session and not agents:
@@ -978,7 +979,7 @@ def assist(
                 except ValueError as exc:
                     _fail("workbench", str(exc), as_json, ExitCode.USAGE)
                 sid = created.id
-            else:
+            elif response_mode is not None:
                 await wb.assistant.update(sid, response_mode=mode)  # type: ignore[arg-type]
             steps = []
             async for step in wb.assistant.send(sid, goal):
