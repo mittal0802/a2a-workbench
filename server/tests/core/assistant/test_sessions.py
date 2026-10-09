@@ -195,3 +195,58 @@ async def test_auth_required_pauses_and_resumes_after_sign_in(svc, wb, oauth_zoo
     resumed = [st async for st in svc.resume(s.id)]
     assert resumed[0].kind == "resumed"
     assert resumed[-1].kind == "done" and resumed[-1].data["text"] == "Done: Held AI175."
+
+
+async def test_task_helpers_only_take_ids_the_agent_returned(svc, agent, wb):
+    s = await _session(svc, agent)
+    steps = [
+        st
+        async for st in svc._run_calls(
+            s.id,
+            [
+                {
+                    "name": "get_task",
+                    "arguments": {"agent": "call_zoo_agent", "task_id": "invented-123"},
+                },
+                {
+                    "name": "cancel_task",
+                    "arguments": {"agent": "call_zoo_agent", "task_id": "invented-456"},
+                },
+            ],
+        )
+    ]
+    rejected = [st for st in steps if st.kind == "rejected_call"]
+    assert [r.data["rule"] for r in rejected] == ["task_unknown", "task_unknown"]
+    assert not any(st.kind == "tool_result" for st in steps)
+    follow = [
+        st
+        async for st in svc._run_calls(
+            s.id,
+            [{"name": "call_zoo_agent", "arguments": {"message": "x", "task_id": "invented-123"}}],
+        )
+    ]
+    assert any(st.kind == "rejected_call" and st.data["rule"] == "task_unknown" for st in follow)
+    assert (await wb.exchanges.list(agent_id=agent.id)) == [] or all(
+        e["operation"] not in ("get_task", "cancel_task", "send_message")
+        for e in await wb.exchanges.list(agent_id=agent.id)
+    )
+
+
+async def test_error_results_do_not_make_ids_known(svc, agent, wb):
+    from a2a_workbench.core.assistant.executor import ToolResult
+    from a2a_workbench.core.assistant.tools import SessionIds
+
+    s = await _session(svc, agent)
+    await svc._record(
+        s.id,
+        agent.id,
+        ToolResult(
+            agent="Zoo",
+            kind="error",
+            task_id="t-err",
+            context_id="c-err",
+            error={"category": "protocol"},
+        ),
+    )
+    ids = SessionIds((await svc._load(s.id)).ids)
+    assert not ids.task_known(agent.id, "t-err") and not ids.context_known(agent.id, "c-err")

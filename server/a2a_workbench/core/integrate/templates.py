@@ -150,7 +150,9 @@ def _auth_code(card: AgentCard) -> tuple[str, dict[str, str]]:
             var = f"{prefix}_ACCESS_TOKEN"
             env[var] = f"OpenID Connect access token for scheme '{name}'"
             url = scheme.open_id_connect_security_scheme.open_id_connect_url
-            lines.append(f"    # Sign in with OpenID Connect ({_comment(url)}) and pass the access token.")
+            lines.append(
+                f"    # Sign in with OpenID Connect ({_comment(url)}) and pass the access token."
+            )
             lines.append(f'    headers["Authorization"] = f"Bearer {{os.environ[{var!r}]}}"')
         elif kind == "mtls_security_scheme":
             env[f"{prefix}_CERT"] = f"Client certificate PEM path for scheme '{name}'"

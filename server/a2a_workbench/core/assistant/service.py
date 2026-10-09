@@ -588,6 +588,8 @@ class AssistantService:
         return None
 
     async def _record(self, sid: str, agent_id: str, result: ToolResult) -> None:
+        if result.kind == "error":
+            return
         row = await self._load(sid)
         ids = SessionIds(row.ids)
         ids.record(agent_id, result.context_id, result.task_id, result.state)
@@ -668,6 +670,28 @@ class AssistantService:
                     },
                 )
                 return reply(json.dumps({"rejected": {"message": message}}), True), None
+            if not SessionIds(row.ids).task_known(target.agent_id, task_id):
+                message = (
+                    f"task_id '{task_id}' was never returned by this agent; only tasks it "
+                    "returned can be read or canceled."
+                )
+                spec_ref = "A2A §3.4.2 (task ids are server-generated)"
+                await self._emit(
+                    sid,
+                    "rejected_call",
+                    {
+                        "tool": call.name,
+                        "agent_id": target.agent_id,
+                        "arguments": call.arguments,
+                        "rule": "task_unknown",
+                        "message": message,
+                        "spec_ref": spec_ref,
+                    },
+                )
+                body = {
+                    "rejected": {"rule": "task_unknown", "message": message, "spec_ref": spec_ref}
+                }
+                return reply(json.dumps(body), True), None
             if call.name == "get_task":
                 result = await self._executor.get_task(target.agent_id, task_id)
             else:
