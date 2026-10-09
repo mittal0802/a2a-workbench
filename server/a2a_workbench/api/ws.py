@@ -1,9 +1,10 @@
-"""Multiplexed WebSocket delivering conversation events and exchange summaries.
+"""Multiplexed WebSocket delivering conversation events, exchange summaries and Assistant steps.
 
 Client messages: ``{"op": "subscribe", "topic": ..., "after_seq": n}`` and
-``{"op": "unsubscribe", "topic": ...}``. Topics are ``conversation:<id>`` and
-``exchanges:<id>``. For conversation topics, events with ``seq > after_seq``
-are delivered exactly once and in order, first from storage, then live.
+``{"op": "unsubscribe", "topic": ...}``. Topics are ``conversation:<id>``,
+``exchanges:<id>`` and ``assistant:<id>``. For conversation and assistant
+topics, events (steps) with ``seq > after_seq`` are delivered exactly once and
+in order, first from storage, then live.
 """
 
 import asyncio
@@ -15,7 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from a2a_workbench.core.workbench import Workbench
 
 router = APIRouter()
-TOPIC_PREFIXES = ("conversation:", "exchanges:")
+TOPIC_PREFIXES = ("conversation:", "exchanges:", "assistant:")
 
 
 async def _pump(ws: WebSocket, wb: Workbench, topic: str, after_seq: int) -> None:
@@ -27,10 +28,16 @@ async def _pump(ws: WebSocket, wb: Workbench, topic: str, after_seq: int) -> Non
                     {"topic": topic, "type": "event", "event": event.model_dump(mode="json")}
                 )
                 last = event.seq
+        elif topic.startswith("assistant:"):
+            for step in await wb.assistant.steps(topic.split(":", 1)[1], after_seq):
+                await ws.send_json(
+                    {"topic": topic, "type": "step", "step": step.model_dump(mode="json")}
+                )
+                last = step.seq
         while True:
             payload: dict[str, Any] = await queue.get()
-            if payload.get("type") == "event":
-                seq = payload["event"]["seq"]
+            if payload.get("type") in ("event", "step"):
+                seq = payload[payload["type"]]["seq"]
                 if seq <= last:
                     continue
                 last = seq

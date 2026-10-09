@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from a2a_workbench.core.assistant.service import SessionNotFoundError
 from a2a_workbench.core.auth.service import CredentialError
 from a2a_workbench.core.blobs import BlobNotFoundError, BlobTooLargeError
 from a2a_workbench.core.connection.cards import CardFetchError
@@ -18,6 +19,7 @@ from a2a_workbench.core.registry.service import AgentExistsError, AgentNotFoundE
 _STATUS: dict[type[Exception], int] = {
     AgentNotFoundError: 404,
     ConversationNotFoundError: 404,
+    SessionNotFoundError: 404,
     BlobNotFoundError: 404,
     AgentExistsError: 409,
     BlobTooLargeError: 413,
