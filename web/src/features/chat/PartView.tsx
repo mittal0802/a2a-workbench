@@ -5,19 +5,42 @@ import { base64Size, dataUrl, formatBytes, partKind } from "../../lib/parts";
 import type { A2APart } from "../../lib/types";
 
 const SAFE_URL = /^https?:\/\//i;
+const MARKDOWN_TYPES = new Set(["", "text/plain", "text/markdown"]);
 
-/** Renders one A2A message or artifact part according to its content and media type. */
-export function PartView({ part }: { part: A2APart }) {
+/** Markdown for agent text: GitHub-flavoured, raw HTML not rendered, links open in a new tab. */
+export function Markdown({ text }: { text: string }) {
+  return (
+    <div className="markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+/** Renders one A2A message or artifact part according to its content and media type.
+ *
+ * With ``markdown``, text without a media type (or ``text/plain``) is rendered as
+ * Markdown, as agents commonly send it; ``text/markdown`` always is.
+ */
+export function PartView({ part, markdown = false }: { part: A2APart; markdown?: boolean }) {
   const kind = partKind(part);
   const media = part.mediaType ?? "";
   const name = part.filename ?? (media || "file");
   let body;
   if (kind === "text") {
     body =
-      media === "text/markdown" ? (
-        <div className="markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text ?? ""}</ReactMarkdown>
-        </div>
+      media === "text/markdown" || (markdown && MARKDOWN_TYPES.has(media)) ? (
+        <Markdown text={part.text ?? ""} />
       ) : (
         <div className="whitespace-pre-wrap">{part.text}</div>
       );

@@ -31,4 +31,20 @@ describe("PartView", () => {
     render(<PartView part={{ url: "javascript:alert(1)" }} />);
     expect(screen.queryByRole("link")).toBeNull();
   });
+  it("renders agent text as markdown when asked, without raw HTML", () => {
+    const { container } = render(
+      <PartView part={{ text: "**Bold** and a [link](https://e.com)\n\n- one\n- two <script>x</script>" }} markdown />,
+    );
+    expect(container.querySelector("strong")?.textContent).toBe("Bold");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelector("script")).toBeNull();
+    const link = screen.getByRole("link", { name: "link" });
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+  });
+
+  it("keeps a declared non-markdown text type plain even when markdown is on", () => {
+    const { container } = render(<PartView part={{ text: "**x**", mediaType: "text/csv" }} markdown />);
+    expect(container.querySelector("strong")).toBeNull();
+  });
 });
