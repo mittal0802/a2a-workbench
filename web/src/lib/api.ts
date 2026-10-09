@@ -1,5 +1,10 @@
 import type { DiffEntry } from "../features/about/CardDiff";
 import type {
+  AssistantSession,
+  AssistantStep,
+  NewAssistantSession,
+  ProviderInfo,
+  ResponseMode,
   Agent,
   AgentCardJson,
   CardPreview,
@@ -54,6 +59,22 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 const json = (b: unknown) => JSON.stringify(b);
 
 export const api = {
+  assistantProviders: () => call<ProviderInfo[]>("/api/assistant/providers"),
+  putAssistantProvider: (provider: string, body: { api_key: string; base_url?: string | null }) =>
+    call<ProviderInfo>(`/api/assistant/providers/${provider}`, { method: "PUT", body: json(body) }),
+  deleteAssistantProvider: (provider: string) => call<void>(`/api/assistant/providers/${provider}`, { method: "DELETE" }),
+  listAssistantSessions: () => call<AssistantSession[]>("/api/assistant/sessions"),
+  createAssistantSession: (body: NewAssistantSession) =>
+    call<AssistantSession>("/api/assistant/sessions", { method: "POST", body: json(body) }),
+  getAssistantSession: (id: string) =>
+    call<{ session: AssistantSession; steps: AssistantStep[] }>(`/api/assistant/sessions/${id}`),
+  patchAssistantSession: (id: string, body: { response_mode?: ResponseMode; agent_ids?: string[]; title?: string }) =>
+    call<AssistantSession>(`/api/assistant/sessions/${id}`, { method: "PATCH", body: json(body) }),
+  sendAssistantMessage: (id: string, text: string) =>
+    call<{ accepted: boolean }>(`/api/assistant/sessions/${id}/messages`, { method: "POST", body: json({ text }) }),
+  resumeAssistantSession: (id: string) =>
+    call<{ accepted: boolean }>(`/api/assistant/sessions/${id}/resume`, { method: "POST" }),
+  stopAssistantSession: (id: string) => call<void>(`/api/assistant/sessions/${id}/stop`, { method: "POST" }),
   listAgents: () => call<Agent[]>("/api/agents"),
   getAgent: (id: string) => call<Agent>(`/api/agents/${id}`),
   previewCard: (url: string) => call<CardPreview>("/api/cards/preview", { method: "POST", body: json({ url }) }),

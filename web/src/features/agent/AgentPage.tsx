@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Avatar } from "../../components/Avatar";
 import { api } from "../../lib/api";
 import { AboutView } from "../about/AboutView";
@@ -25,13 +25,14 @@ export function AgentPage() {
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => api.getAgent(agentId) });
   const security = useQuery({ queryKey: ["security", agentId], queryFn: () => api.security(agentId) });
   const [prefill, setPrefill] = useState<string | undefined>();
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const [conversationId, setConversationId] = useState<string | null>(params.get("conversation"));
   const [inspecting, setInspecting] = useState(false);
   const [focusExchange, setFocusExchange] = useState<string | undefined>();
   const [shownAgent, setShownAgent] = useState(agentId);
   if (shownAgent !== agentId) {
     setShownAgent(agentId);
-    setConversationId(null);
+    setConversationId(params.get("conversation"));
     setPrefill(undefined);
   }
   const changeConversation = useCallback((id: string | null) => setConversationId(id), []);

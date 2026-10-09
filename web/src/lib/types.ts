@@ -200,3 +200,54 @@ export type OAuthSignInInput = {
   username?: string;
   password?: string;
 };
+
+export type ProviderInfo = {
+  provider: "anthropic" | "openai" | "gemini";
+  configured: boolean;
+  source: "stored" | "env" | "none";
+  preview?: string | null;
+  base_url?: string | null;
+  default_model?: string | null;
+};
+export type ResponseMode = "rewrite" | "pass_through";
+export type AssistantLimits = { max_steps: number; call_timeout_s: number; run_timeout_s: number; token_budget: number };
+export type AssistantSession = {
+  id: string;
+  title: string;
+  provider: string;
+  model: string;
+  response_mode: ResponseMode;
+  agent_ids: string[];
+  limits: AssistantLimits;
+  status: "idle" | "running" | "awaiting_user" | "awaiting_sign_in" | "stopped";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pending: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+};
+export type AssistantStep = {
+  session_id: string;
+  seq: number;
+  kind:
+    | "user"
+    | "assistant"
+    | "tool_call"
+    | "rejected_call"
+    | "tool_result"
+    | "agent_output"
+    | "paused"
+    | "resumed"
+    | "limit"
+    | "error"
+    | "done";
+  ts: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: Record<string, any>;
+};
+export type NewAssistantSession = {
+  provider: string;
+  model?: string;
+  response_mode: ResponseMode;
+  agent_ids: string[];
+  title?: string;
+};
