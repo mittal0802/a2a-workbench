@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { api } from "../../lib/api";
 import { INTERRUPTED, RUNNING } from "../../lib/labels";
 import { toPartInputs } from "../../lib/parts";
@@ -57,6 +58,13 @@ export function ChatView({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations", agent.id] }),
   });
   const stop = useMutation({ mutationFn: () => api.cancel(conversationId!) });
+  const removeConversation = useMutation({
+    mutationFn: (id: string) => api.deleteConversation(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["conversations", agent.id] });
+      if (id === conversationId) onConversationChange(null);
+    },
+  });
   const resubscribe = useMutation({ mutationFn: () => api.resubscribe(conversationId!) });
   const checkStatus = useMutation({ mutationFn: () => api.checkStatus(conversationId!) });
 
@@ -73,9 +81,15 @@ export function ChatView({
           ＋ New conversation
         </button>
         {conversations.data?.map((c) => (
-          <button key={c.id} className={c.id === conversationId ? "on" : ""} onClick={() => onConversationChange(c.id)} title={c.context_id ?? ""}>
-            {c.title}
-          </button>
+          <span key={c.id} className="conv">
+            <button className={c.id === conversationId ? "on" : ""} onClick={() => onConversationChange(c.id)} title={c.context_id ?? ""}>
+              {c.origin === "assistant" ? "✦ " : ""}
+              {c.title}
+            </button>
+            <ConfirmButton label={`Delete conversation ${c.title}`} question="Delete?" onConfirm={() => removeConversation.mutate(c.id)}>
+              ✕
+            </ConfirmButton>
+          </span>
         ))}
       </div>
       <div className="scroll">

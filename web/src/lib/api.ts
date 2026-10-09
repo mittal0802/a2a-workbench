@@ -76,6 +76,8 @@ export const api = {
     call<{ accepted: boolean }>(`/api/assistant/sessions/${id}/messages`, { method: "POST", body: json({ text }) }),
   resumeAssistantSession: (id: string) =>
     call<{ accepted: boolean }>(`/api/assistant/sessions/${id}/resume`, { method: "POST" }),
+  deleteAssistantSession: (id: string) => call<void>(`/api/assistant/sessions/${id}`, { method: "DELETE" }),
+  deleteConversation: (id: string) => call<void>(`/api/conversations/${id}`, { method: "DELETE" }),
   stopAssistantSession: (id: string) => call<void>(`/api/assistant/sessions/${id}/stop`, { method: "POST" }),
   listAgents: () => call<Agent[]>("/api/agents"),
   getAgent: (id: string) => call<Agent>(`/api/agents/${id}`),

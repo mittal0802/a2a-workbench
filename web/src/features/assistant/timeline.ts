@@ -9,7 +9,7 @@ export type ThreadItem =
   | { type: "call"; call?: AssistantStep; result?: AssistantStep; rejected?: AssistantStep; outputs: AssistantStep[] }
   | { type: "agent"; agent: string; agentId: string; outputs: AssistantStep[] }
   | { type: "pause"; step: AssistantStep }
-  | { type: "final"; step: AssistantStep }
+  | { type: "final"; step: AssistantStep; exchangeId?: string }
   | { type: "note"; step: AssistantStep };
 
 /** Groups Assistant steps into thread items: each tool call with its outputs and result. */
@@ -17,6 +17,7 @@ export function buildThread(steps: AssistantStep[]): ThreadItem[] {
   const items: ThreadItem[] = [];
   let open: Extract<ThreadItem, { type: "call" }> | null = null;
   let loose: AssistantStep[] = [];
+  let lastCall: string | undefined;
   const flushLoose = () => {
     if (loose.length) items.push({ type: "agent", agent: loose[0].data.agent, agentId: loose[0].data.agent_id, outputs: loose });
     loose = [];
@@ -43,9 +44,10 @@ export function buildThread(steps: AssistantStep[]): ThreadItem[] {
       open = null;
       if (s.kind === "user") items.push({ type: "user", step: s });
       else if (s.kind === "assistant") {
+        lastCall = s.data.exchange_id ?? undefined;
         if (s.data.text && (s.data.tool_calls ?? []).length > 0) items.push({ type: "think", step: s });
       } else if (s.kind === "paused") items.push({ type: "pause", step: s });
-      else if (s.kind === "done") items.push({ type: "final", step: s });
+      else if (s.kind === "done") items.push({ type: "final", step: s, exchangeId: lastCall });
       else items.push({ type: "note", step: s });
     }
   }

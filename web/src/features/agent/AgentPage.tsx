@@ -9,6 +9,7 @@ import { InspectDrawer } from "../inspect/InspectDrawer";
 import { SecurityView } from "../security/SecurityView";
 import { TasksView } from "../tasks/TasksView";
 import { IntegrateView } from "../integrate/IntegrateView";
+import { ConfirmButton } from "../../components/ConfirmButton";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
@@ -131,6 +132,30 @@ export function AgentPage() {
               navigate(`/agents/${a.id}/chat`);
             }}
           />
+          <div className="card" style={{ margin: "0 24px 24px", maxWidth: 940 }}>
+            <div className="card-b" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <b>Remove this agent</b>
+                <div className="no" style={{ fontSize: 12.5 }}>
+                  Deletes its conversations, recorded traffic and saved credentials from the Workbench. The agent itself is not affected.
+                </div>
+              </div>
+              <ConfirmButton
+                label="Remove agent"
+                question={`Remove ${a.name}?`}
+                confirmLabel="Remove"
+                className="btn ghost"
+                onConfirm={() =>
+                  api.deleteAgent(a.id).then(() => {
+                    qc.invalidateQueries({ queryKey: ["agents"] });
+                    navigate("/");
+                  })
+                }
+              >
+                Remove agent
+              </ConfirmButton>
+            </div>
+          </div>
         </section>
       </div>
     </>

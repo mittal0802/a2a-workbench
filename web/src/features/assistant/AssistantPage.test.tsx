@@ -159,33 +159,41 @@ describe("AssistantPage", () => {
       provider: "openai", model: "scripted", agent_ids: ["ag1"], response_mode: "rewrite" })));
   });
 
-  it("provider settings never show a stored key and save a new one", async () => {
-    vi.spyOn(api, "getAssistantSession").mockResolvedValue({ session: session(), steps: [] } as never);
-    const put = vi.spyOn(api, "putAssistantProvider").mockResolvedValue({} as never);
-    renderAt("/assistant/s1");
-    await userEvent.click(await screen.findByRole("button", { name: /model/i }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/••••0001/)).toBeInTheDocument();
-    expect((within(dialog).getByLabelText(/api key/i) as HTMLInputElement).value).toBe("");
-    await userEvent.type(within(dialog).getByLabelText(/api key/i), "sk-new");
-    await userEvent.click(within(dialog).getByRole("button", { name: /save key/i }));
-    expect(put).toHaveBeenCalledWith("openai", { api_key: "sk-new", base_url: "http://llm/v1" });
-  });
-  it("sends a base URL only for OpenAI-compatible providers", async () => {
+  it("links to the key settings when the provider has no key", async () => {
     vi.spyOn(api, "listAssistantSessions").mockResolvedValue([] as never);
-    const put = vi.spyOn(api, "putAssistantProvider").mockResolvedValue({} as never);
     renderAt("/assistant");
-    await userEvent.selectOptions(await screen.findByLabelText(/provider/i), "openai");
-    await userEvent.click(screen.getByRole("button", { name: /model/i }));
-    let dialog = await screen.findByRole("dialog");
-    await userEvent.clear(within(dialog).getByLabelText(/base url/i));
-    await userEvent.type(within(dialog).getByLabelText(/base url/i), "http://other/v1");
-    await userEvent.click(within(dialog).getByRole("button", { name: /close/i }));
-    await userEvent.selectOptions(screen.getByLabelText(/provider/i), "anthropic");
-    await userEvent.click(screen.getByRole("button", { name: /model/i }));
-    dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByLabelText(/api key/i), "sk-ant");
-    await userEvent.click(within(dialog).getByRole("button", { name: /save key/i }));
-    expect(put).toHaveBeenLastCalledWith("anthropic", { api_key: "sk-ant", base_url: null });
+    await userEvent.selectOptions(await screen.findByLabelText(/provider/i), "gemini");
+    expect(screen.getByRole("link", { name: /add a key/i })).toHaveAttribute("href", "/settings");
+  });
+
+  it("opens the raw LLM calls of the chat, and the call behind a reply", async () => {
+    vi.spyOn(api, "getAssistantSession").mockResolvedValue({
+      session: session(),
+      steps: [step("user", { text: "hi" }), step("assistant", { text: "Hello", tool_calls: [], exchange_id: "ex1" }),
+        step("done", { text: "Hello" })],
+    } as never);
+    vi.spyOn(api, "listExchanges").mockResolvedValue([
+      { id: "ex1", operation: "llm_call", http_method: "POST", url: "https://api.anthropic.com/v1/messages",
+        started_at: "", status: 200, duration_ms: 812, error: null, frame_count: 0 },
+    ] as never);
+    const get = vi.spyOn(api, "getExchange").mockResolvedValue({
+      id: "ex1", operation: "llm_call", http_method: "POST", url: "https://api.anthropic.com/v1/messages", started_at: "",
+      status: 200, duration_ms: 812, error: null, frame_count: 0, request_headers: { "x-api-key": "••••" },
+      request_body: '{"model":"claude-sonnet-5-5"}', response_headers: {}, response_body: '{"content":[]}', frames: [], truncated: false,
+    } as never);
+    renderAt("/assistant/s1");
+    await userEvent.click(await screen.findByRole("button", { name: /view llm call/i }));
+    expect(await screen.findByText(/"claude-sonnet-5-5"/)).toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith("ex1");
+    expect(screen.getAllByText(/LLM call/).length).toBeGreaterThan(0);
+  });
+
+  it("deletes a chat after confirming", async () => {
+    vi.spyOn(api, "getAssistantSession").mockResolvedValue({ session: session(), steps: [] } as never);
+    const del = vi.spyOn(api, "deleteAssistantSession").mockResolvedValue(undefined as never);
+    renderAt("/assistant/s1");
+    await userEvent.click(await screen.findByRole("button", { name: /delete chat ask/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(del).toHaveBeenCalledWith("s1");
   });
 });

@@ -55,6 +55,9 @@ export function Sidebar({ onConnect }: { onConnect: () => void }) {
           ⌂
         </div>
         <div style={{ fontSize: 13, fontWeight: 500 }}>Local workspace</div>
+        <NavLink to="/settings" className="ib" aria-label="Settings" title="Settings">
+          ⚙
+        </NavLink>
         <ThemeToggle />
       </div>
     </aside>

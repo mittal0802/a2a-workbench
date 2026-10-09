@@ -324,3 +324,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .htmlpart-h{display:flex;align-items:center;padding:4px 8px;background:var(--soft);font-size:11.5px}
 .htmlframe{display:block;width:100%;height:360px;border:0;background:#fff;resize:vertical;overflow:auto}
 .htmlpart pre.code{border:0;border-radius:0;margin:0;max-height:360px}
+.confirm{display:inline-flex;align-items:center;gap:6px;font-size:12.5px}
+.btn.danger{background:var(--red);color:#fff;border-color:var(--red)}
+.convs .conv{display:inline-flex;align-items:center}
+.convs .conv .ib{padding:2px 6px;opacity:.55}
+.convs .conv:hover .ib{opacity:1}

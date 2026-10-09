@@ -8,7 +8,8 @@ import { api } from "../../lib/api";
 import type { AssistantSession, AssistantStep, ResponseMode } from "../../lib/types";
 import { getHub } from "../../lib/ws";
 import { Markdown } from "../chat/PartView";
-import { ProviderSettings } from "./ProviderSettings";
+import { ConfirmButton } from "../../components/ConfirmButton";
+import { InspectDrawer } from "../inspect/InspectDrawer";
 import { OutParts, StepCard } from "./StepCard";
 import { buildThread, outputParts } from "./timeline";
 
@@ -64,7 +65,20 @@ export function AssistantPage() {
   const [model, setModel] = useState("");
   const [mode, setMode] = useState<ResponseMode>("rewrite");
   const [enabled, setEnabled] = useState<string[] | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const [focusCall, setFocusCall] = useState<string | undefined>();
+  const viewCall = (id?: string) => {
+    if (!id) return;
+    setFocusCall(id);
+    setInspecting(true);
+  };
+  const removeChat = useMutation({
+    mutationFn: (id: string) => api.deleteAssistantSession(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["assistant-sessions"] });
+      if (id === sessionId) navigate("/assistant");
+    },
+  });
   const [text, setText] = useState("");
   const activeProvider = session?.provider ?? (provider || providers.data?.find((p) => p.configured)?.provider || "anthropic");
   const providerInfo = providers.data?.find((p) => p.provider === activeProvider);
@@ -141,9 +155,17 @@ export function AssistantPage() {
               </button>
             ))}
           </div>
-          <button className="conn" onClick={() => setSettingsOpen(true)} aria-label="Model and API key">
+          <span className="conn" title={`${activeProvider} · ${activeModel}`}>
             Model <b>{activeModel || "choose…"}</b>
-          </button>
+          </span>
+          {sessionId && (
+            <button className="btn" onClick={() => setInspecting(!inspecting)} aria-pressed={inspecting}>
+              Inspect
+            </button>
+          )}
+          <Link className="btn ghost" to="/settings">
+            Keys
+          </Link>
         </div>
         {!session && providers.data && (
           <div className="thread" style={{ paddingBottom: 0 }}>
@@ -167,9 +189,9 @@ export function AssistantPage() {
             {providerInfo && !providerInfo.configured && (
               <div className="note warn">
                 No API key for {activeProvider} yet.{" "}
-                <button className="try" onClick={() => setSettingsOpen(true)}>
+                <Link className="try" to="/settings">
                   Add a key
-                </button>
+                </Link>
               </div>
             )}
           </div>
@@ -190,6 +212,11 @@ export function AssistantPage() {
                 return (
                   <div className="think" key={i}>
                     <Markdown text={item.step.data.text} />
+                    {item.step.data.exchange_id && (
+                      <button className="ib" onClick={() => viewCall(item.step.data.exchange_id)}>
+                        View LLM call
+                      </button>
+                    )}
                   </div>
                 );
               if (item.type === "call")
@@ -231,6 +258,11 @@ export function AssistantPage() {
                       <div className="name" style={{ display: "flex", alignItems: "center" }}>
                         <span>Assistant</span>
                         <span className="spacer" />
+                        {item.exchangeId && (
+                          <button className="ib copyraw" onClick={() => viewCall(item.exchangeId)}>
+                            View LLM call
+                          </button>
+                        )}
                         <CopyButton text={() => item.step.data.text ?? ""} label="Copy raw" className="ib copyraw" />
                       </div>
                       <Markdown text={item.step.data.text ?? ""} />
@@ -247,6 +279,11 @@ export function AssistantPage() {
                         ? "Stopped."
                         : `Stopped: limit reached (${d.limit}${d.value !== undefined ? ` = ${d.value}` : ""}).`
                       : d.message}
+                  {d.exchange_id && (
+                    <button className="try" style={{ marginLeft: 8 }} onClick={() => viewCall(d.exchange_id)}>
+                      View LLM call
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -302,13 +339,18 @@ export function AssistantPage() {
           <span>+</span>New chat
         </Link>
         {(sessions.data ?? []).map((s) => (
-          <Link key={s.id} to={`/assistant/${s.id}`} className={`agent ${s.id === sessionId ? "on" : ""}`} style={{ display: "block", padding: "6px 8px" }}>
-            <div className="nm" style={{ fontSize: 13 }}>{s.title}</div>
-            <div className="sub">{s.status.replace("_", " ")}</div>
-          </Link>
+          <div key={s.id} style={{ display: "flex", alignItems: "center" }}>
+            <Link to={`/assistant/${s.id}`} className={`agent ${s.id === sessionId ? "on" : ""}`} style={{ display: "block", padding: "6px 8px", flex: 1, minWidth: 0 }}>
+              <div className="nm" style={{ fontSize: 13 }}>{s.title}</div>
+              <div className="sub">{s.status.replace("_", " ")}</div>
+            </Link>
+            <ConfirmButton label={`Delete chat ${s.title}`} question="Delete?" onConfirm={() => removeChat.mutate(s.id)}>
+              ✕
+            </ConfirmButton>
+          </div>
         ))}
       </aside>
-      <ProviderSettings key={activeProvider} open={settingsOpen} onOpenChange={setSettingsOpen} provider={activeProvider} info={providerInfo} />
+      <InspectDrawer conversationId={sessionId ?? null} open={inspecting} onClose={() => setInspecting(false)} focusExchangeId={focusCall} />
     </div>
   );
 }
