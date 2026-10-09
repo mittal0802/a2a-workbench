@@ -23,7 +23,10 @@ TOKEN_HEADER = "x-a2a-notification-token"
 """Header the official SDK sends the config token in; A2A itself does not name one."""
 RATE_LIMIT = 60
 RATE_WINDOW_S = 60.0
-MAX_BODY = 1024 * 1024
+MAX_REQUEST = 16 * 1024 * 1024
+"""Largest notification accepted (bytes); larger ones are refused before they are read."""
+MAX_STORED = 1024 * 1024
+"""Largest body kept with a delivery; the whole body is still validated."""
 _KINDS = {"task", "message", "status_update", "artifact_update"}
 
 
@@ -137,7 +140,7 @@ class Receiver:
             return 404, None
         if self._limited(hook_id):
             return 429, None
-        text = body[:MAX_BODY].decode("utf-8", errors="replace")
+        text = body.decode("utf-8", errors="replace")
         reasons: list[str] = []
         notes: list[str] = []
         if not self._authentic(hook, headers):
@@ -186,6 +189,12 @@ class Receiver:
                     )
                 ).first()
             duplicate = seen is not None
+        stored = "" if {"unauthenticated", "wrong_token"} & set(reasons) else text
+        if len(stored) > MAX_STORED:
+            stored = ""
+            notes.append(
+                f"Body of {len(text)} characters validated but not stored (over {MAX_STORED})."
+            )
         row = PushDelivery(
             hook_id=hook.id,
             agent_id=hook.agent_id,
@@ -197,7 +206,7 @@ class Receiver:
             task_id=task_id,
             state=state,
             headers=_masked(headers),
-            body=text if not ("unauthenticated" in reasons or "wrong_token" in reasons) else "",
+            body=stored,
             body_hash=body_hash,
         )
         async with self._db.sessions() as session:
