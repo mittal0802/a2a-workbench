@@ -197,3 +197,16 @@ def test_probe_endpoint(c, bearer_zoo):
         "accepts_your_credentials",
     ]
     assert results[0]["outcome"] == "pass" and results[2]["outcome"] == "skipped"
+
+
+def test_callback_page_cannot_be_used_for_script_injection(c):
+    evil = "</script><script>alert(document.domain)</script>"
+    r = c.get("/oauth/callback", params={"error": "x", "error_description": evil})
+    assert r.status_code == 400
+    assert "<script>alert" not in r.text
+    assert "</script><script>alert" not in r.text
+    assert r.text.count("<script") == 2
+    csp = r.headers["content-security-policy"]
+    assert "default-src 'none'" in csp and "script-src 'sha256-" in csp
+    page = c.get("/oauth/callback")
+    assert "script-src 'sha256-" in page.headers["content-security-policy"]

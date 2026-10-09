@@ -1,5 +1,7 @@
 """OAuth sign-in endpoints: browser start, provider callback, implicit fragment, device polling."""
 
+import base64
+import hashlib
 import json
 from html import escape
 
@@ -82,25 +84,42 @@ async def poll_device(flow_id: str, wb: Workbench = Depends(get_workbench)) -> d
     return {"status": await wb.auth.poll_device_flow(flow_id)}
 
 
+_CALLBACK_SCRIPT = (
+    "try{const d=JSON.parse(document.getElementById('a2aw').textContent);"
+    "window.opener&&window.opener.postMessage(d,location.origin);"
+    "setTimeout(()=>window.close(),1200)}catch(e){}"
+)
+
+
+def _csp(*scripts: str) -> str:
+    hashes = " ".join(
+        "'sha256-" + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() + "'"
+        for s in scripts
+    )
+    return (
+        f"default-src 'none'; script-src {hashes}; style-src 'unsafe-inline'; "
+        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    )
+
+
 def _page(title: str, message: str, status: int, ok: bool) -> HTMLResponse:
     payload = json.dumps({"type": "a2aw-oauth", "ok": ok, "message": message})
+    for char, escaped in (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e")):
+        payload = payload.replace(char, escaped)
     return HTMLResponse(
         "<!doctype html><meta charset=utf-8><title>A2A Workbench sign-in</title>"
         "<body style='font-family:Inter,system-ui,sans-serif;display:grid;place-items:center;"
         "min-height:80vh;color:#1d1d1f'><div style='text-align:center'>"
         f"<h2>{escape(title)}</h2><p>{escape(message)}</p>"
         "<p style='color:#6b6b70'>You can close this window.</p></div>"
-        f"<script>try{{window.opener&&window.opener.postMessage({payload},location.origin);"
-        "setTimeout(()=>window.close(),1200)}catch(e){}</script></body>",
+        f"<script type=application/json id=a2aw>{payload}</script>"
+        f"<script>{_CALLBACK_SCRIPT}</script></body>",
         status_code=status,
+        headers={"Content-Security-Policy": _csp(_CALLBACK_SCRIPT)},
     )
 
 
-IMPLICIT_PAGE = """<!doctype html><meta charset=utf-8><title>A2A Workbench sign-in</title>
-<body style="font-family:Inter,system-ui,sans-serif;display:grid;place-items:center;
-min-height:80vh">
-<p id=m>Finishing sign-in…</p>
-<script>
+IMPLICIT_SCRIPT = """
 const p = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
 fetch("/oauth/implicit", {method: "POST", headers: {"content-type": "application/json"},
   body: JSON.stringify(p)}).then(async r => {
@@ -112,14 +131,22 @@ fetch("/oauth/implicit", {method: "POST", headers: {"content-type": "application
   if (ok) setTimeout(() => window.close(), 1200);
 });
 history.replaceState(null, "", location.pathname);
-</script></body>"""
+"""
+IMPLICIT_PAGE = (
+    "<!doctype html><meta charset=utf-8><title>A2A Workbench sign-in</title>"
+    '<body style="font-family:Inter,system-ui,sans-serif;display:grid;place-items:center;'
+    'min-height:80vh"><p id=m>Finishing sign-in…</p>'
+    f"<script>{IMPLICIT_SCRIPT}</script></body>"
+)
 
 
 @router.get("/oauth/callback", include_in_schema=False)
 async def oauth_callback(request: Request, wb: Workbench = Depends(get_workbench)) -> HTMLResponse:
     q = request.query_params
     if not q.get("state") and not q.get("code") and not q.get("error"):
-        return HTMLResponse(IMPLICIT_PAGE)
+        return HTMLResponse(
+            IMPLICIT_PAGE, headers={"Content-Security-Policy": _csp(IMPLICIT_SCRIPT)}
+        )
     if q.get("error"):
         message = q.get("error_description") or q["error"]
         if q.get("state"):
