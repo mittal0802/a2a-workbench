@@ -156,7 +156,12 @@ class AuthService:
             self._pending.pop(key, None)
         return data
 
-    def _single_flow(self, card: AgentCard, scheme_name: str) -> str:
+    def flow_for(self, card: AgentCard, scheme_name: str) -> str:
+        """Return the OAuth flow a scheme declares (``authorization_code`` for OpenID Connect).
+
+        Raises:
+            CredentialError: if the card has no such scheme or it is not OAuth 2.0 / OIDC.
+        """
         if scheme_name not in card.security_schemes:
             raise CredentialError(f"the agent card declares no scheme named '{scheme_name}'")
         flows = oauth_flows(card.security_schemes[scheme_name])
@@ -189,7 +194,7 @@ class AuthService:
 
         from a2a_workbench.core.auth import oauth
 
-        flow = self._single_flow(card, scheme_name)
+        flow = self.flow_for(card, scheme_name)
         if flow not in ("authorization_code", "implicit"):
             raise CredentialError(f"'{scheme_name}' uses {flow}, not a browser sign-in")
         endpoints = await self.endpoints(card, scheme_name, flow)
@@ -308,7 +313,7 @@ class AuthService:
         from a2a_workbench.core.auth import oauth
         from a2a_workbench.core.errors import AgentCallError
 
-        flow = self._single_flow(card, scheme_name)
+        flow = self.flow_for(card, scheme_name)
         if flow != "device_code":
             raise CredentialError(f"'{scheme_name}' uses {flow}, not device code")
         endpoints = await self.endpoints(card, scheme_name, flow)
@@ -670,6 +675,53 @@ class AuthService:
         if missing:
             raise CredentialError(f"missing {', '.join(missing)}")
         return await self.credentials.put(agent_id, scheme_name, kind, secret)  # type: ignore[arg-type]
+
+
+def credential_values(
+    card: AgentCard,
+    scheme_name: str,
+    *,
+    api_key: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    token: str | None = None,
+    access_token: str | None = None,
+    cert_pem: str | None = None,
+    key_pem: str | None = None,
+    ca_pem: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Turn the given values into a ``(kind, secret)`` pair for ``set_credential``.
+
+    A bearer ``token`` for an OAuth 2.0 / OpenID Connect scheme is stored as an
+    OAuth access token.
+
+    Raises:
+        CredentialError: if no usable combination of values is given.
+    """
+    if api_key:
+        return "api_key", {"value": api_key}
+    if username or password:
+        return "http_basic", {"username": username or "", "password": password or ""}
+    if token:
+        scheme = (
+            card.security_schemes.get(scheme_name) if scheme_name in card.security_schemes else None
+        )
+        if scheme is not None and scheme.WhichOneof("scheme") in (
+            "oauth2_security_scheme",
+            "open_id_connect_security_scheme",
+        ):
+            return "oauth2", {"access_token": token}
+        return "http_bearer", {"token": token}
+    if access_token:
+        return "oauth2", {"access_token": access_token}
+    if cert_pem and key_pem:
+        secret = {"cert_pem": cert_pem, "key_pem": key_pem}
+        if ca_pem:
+            secret["ca_pem"] = ca_pem
+        return "mtls", secret
+    raise CredentialError(
+        "give api_key, username/password, token, access_token or a client certificate and key"
+    )
 
 
 def _dt(epoch: float | None) -> Any:

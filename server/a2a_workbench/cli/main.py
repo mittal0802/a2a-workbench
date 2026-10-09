@@ -665,38 +665,25 @@ def auth_set(
     """Store a credential for one of the agent's security schemes."""
     from a2a_workbench.core.a2a_json import card_from_json
 
-    if api_key:
-        kind, secret = "api_key", {"value": api_key}
-    elif username or password:
-        kind, secret = "http_basic", {"username": username or "", "password": password or ""}
-    elif token:
-        kind, secret = "http_bearer", {"token": token}
-    elif access_token:
-        kind, secret = "oauth2", {"access_token": access_token}
-    elif cert and key:
-        kind = "mtls"
-        secret = {"cert_pem": cert.read_text(), "key_pem": key.read_text()}
-        if ca:
-            secret["ca_pem"] = ca.read_text()
-    else:
-        typer.echo(
-            "give --api-key, --username/--password, --token, --access-token or --cert/--key",
-            err=True,
-        )
-        raise typer.Exit(ExitCode.USAGE)
-
     async def go() -> Any:
+        from a2a_workbench.core.auth.service import credential_values
+
         async with Workbench.open(Settings()) as wb:
             agent = await _resolve_or_register(wb, target, as_json)
-            row = await wb.agents.row(agent.id)
-            card = card_from_json(row.card)
-            if kind == "http_bearer" and scheme in card.security_schemes:
-                accepts = card.security_schemes[scheme].WhichOneof("scheme")
-                if accepts in ("oauth2_security_scheme", "open_id_connect_security_scheme"):
-                    return await wb.auth.set_credential(
-                        agent.id, card, scheme, "oauth2", {"access_token": token}
-                    )
+            card = card_from_json((await wb.agents.row(agent.id)).card)
             try:
+                kind, secret = credential_values(
+                    card,
+                    scheme,
+                    api_key=api_key,
+                    username=username,
+                    password=password,
+                    token=token,
+                    access_token=access_token,
+                    cert_pem=cert.read_text() if cert else None,
+                    key_pem=key.read_text() if key else None,
+                    ca_pem=ca.read_text() if ca else None,
+                )
                 return await wb.auth.set_credential(agent.id, card, scheme, kind, secret)
             except Exception as exc:
                 _auth_failed(exc, as_json)
@@ -736,7 +723,7 @@ def auth_login(
             agent = await _resolve_or_register(wb, target, as_json)
             card = card_from_json((await wb.agents.row(agent.id)).card)
             try:
-                flow = wb.auth._single_flow(card, scheme)
+                flow = wb.auth.flow_for(card, scheme)
                 if flow in ("client_credentials", "password"):
                     return await wb.auth.sign_in(
                         agent.id,
