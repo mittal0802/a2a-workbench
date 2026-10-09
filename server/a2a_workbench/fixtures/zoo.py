@@ -10,6 +10,7 @@ from typing import Any
 
 import a2a.client  # noqa: F401  # must load before a2a.compat.v0_3.grpc_handler (SDK import cycle)
 import grpc
+import httpx
 from a2a.compat.v0_3 import a2a_v0_3_pb2_grpc
 from a2a.compat.v0_3.grpc_handler import CompatGrpcHandler
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -20,7 +21,12 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
     create_rest_routes,
 )
-from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
+from a2a.server.tasks import (
+    BasePushNotificationSender,
+    InMemoryPushNotificationConfigStore,
+    InMemoryTaskStore,
+    TaskUpdater,
+)
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
@@ -307,6 +313,7 @@ def build_zoo_app(
     auth: str = "none",
     idp: Any = None,
     extended_configured: bool = True,
+    push: bool = True,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
@@ -322,6 +329,7 @@ def build_zoo_app(
     host = base_url.split("://", 1)[1].split(":", 1)[0]
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
     card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
+    card.capabilities.push_notifications = push
     schemes, requirements = security_for(auth, idp.issuer if idp else None)
     for name, scheme in schemes.items():
         card.security_schemes[name].CopyFrom(scheme)
@@ -372,12 +380,17 @@ def build_zoo_app(
             examples=["echo visa"],
         )
     )
+    push_store = InMemoryPushNotificationConfigStore() if push else None
     handler = DefaultRequestHandlerV2(
         agent_executor=ZooExecutor(),
         task_store=InMemoryTaskStore(),
         agent_card=card,
         extended_agent_card=(
             extended if card.capabilities.extended_agent_card and extended_configured else None
+        ),
+        push_config_store=push_store,
+        push_sender=(
+            BasePushNotificationSender(httpx.AsyncClient(timeout=10), push_store) if push else None
         ),
     )
 

@@ -14,6 +14,7 @@ from a2a_workbench.core.config import Settings
 from a2a_workbench.core.conversations.service import ConversationService
 from a2a_workbench.core.exchanges import ExchangeStore
 from a2a_workbench.core.integrate.service import IntegrationService
+from a2a_workbench.core.push.service import PushService
 from a2a_workbench.core.registry.service import AgentService
 from a2a_workbench.core.store.db import Database
 from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Workspace
@@ -38,6 +39,7 @@ class Workbench:
             self.db, self.bus, self.exchanges, self.blobs, self.auth
         )
         self.tasks = TaskService(self.agents, self.exchanges, self.auth)
+        self.push = PushService(self.tasks)
         self.assistant = AssistantService(self)
         self.integrate = IntegrationService(self.agents)
 
