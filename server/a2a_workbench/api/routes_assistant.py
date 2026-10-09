@@ -101,8 +101,7 @@ async def update_session(
 async def send(
     session_id: str, body: MessageIn, request: Request, wb: Workbench = Depends(get_workbench)
 ) -> dict[str, bool]:
-    if (await wb.assistant.get(session_id)).status == "running":
-        raise HTTPException(409, detail={"category": "workbench", "message": "a turn is running"})
+    await wb.assistant.get(session_id)
     _spawn(request, wb.assistant.send(session_id, body.text))
     return {"accepted": True}
 

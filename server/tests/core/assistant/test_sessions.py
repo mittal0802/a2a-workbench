@@ -287,3 +287,20 @@ async def test_failure_during_a_call_leaves_a_valid_transcript(svc, agent, monke
     steps = await _turn(svc, s.id, "echo hi")
     assert steps[-1].kind == "error" and "exploded" in steps[-1].data["message"]
     _assert_every_call_answered((await svc._load(s.id)).transcript)
+
+
+async def test_a_second_turn_while_one_runs_is_refused_and_stop_hits_the_running_one(svc, agent):
+    from a2a_workbench.core.assistant.service import TurnInProgressError
+
+    s = await _session(svc, agent)
+    first = asyncio.ensure_future(_drain(svc.send(s.id, "slow 3")))
+    await asyncio.sleep(0.3)
+    with pytest.raises(TurnInProgressError):
+        svc.send(s.id, "echo second")
+    with pytest.raises(TurnInProgressError):
+        svc.resume(s.id)
+    await svc.stop(s.id)
+    steps = await asyncio.wait_for(first, 5)
+    assert steps[-1].kind == "limit" and steps[-1].data["limit"] == "stopped"
+    after = await _turn(svc, s.id, "echo third")
+    assert after[-1].kind == "done"

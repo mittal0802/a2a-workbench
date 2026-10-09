@@ -112,6 +112,10 @@ class SessionNotFoundError(LookupError):
     """No Assistant chat has this id."""
 
 
+class TurnInProgressError(RuntimeError):
+    """A turn or resume is already running for this Assistant chat."""
+
+
 def _out(row: AssistantSession) -> SessionOut:
     return SessionOut(
         id=row.id,
@@ -156,7 +160,7 @@ class AssistantService:
         self._adapters = adapter_factory
         self._executor = AgentCallExecutor(wb)
         self._watch_interval = watch_interval_s
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._busy: set[str] = set()
         self._running: dict[str, asyncio.Task[None]] = {}
         self._watchers: dict[str, asyncio.Task[None]] = {}
         self._sinks: dict[str, list[asyncio.Queue[Step | None]]] = {}
@@ -287,48 +291,76 @@ class AssistantService:
             queue.put_nowait(step)
         return step
 
-    async def _stream(self, sid: str, work: Callable[[], Awaitable[None]]) -> AsyncIterator[Step]:
-        await self._load(sid)
+    def _start(self, sid: str, work: Callable[[], Awaitable[None]]) -> AsyncIterator[Step]:
+        """Claim the chat and start ``work`` now; return an iterator over its steps.
+
+        Raises:
+            TurnInProgressError: if a turn or resume is already running for the chat.
+        """
+        if sid in self._busy:
+            raise TurnInProgressError(f"assistant chat {sid} is already running a turn")
+        self._busy.add(sid)
         queue: asyncio.Queue[Step | None] = asyncio.Queue()
-        lock = self._locks.setdefault(sid, asyncio.Lock())
+        self._sinks.setdefault(sid, []).append(queue)
 
         async def run() -> None:
-            async with lock:
-                self._sinks.setdefault(sid, []).append(queue)
-                try:
-                    await work()
-                except asyncio.CancelledError:
-                    await self._save(sid, status="stopped", pending=None)
-                    await self._emit(sid, "limit", {"limit": "stopped", "message": "Stopped."})
-                except Exception as exc:
-                    await self._save(sid, status="idle")
-                    await self._emit(
-                        sid, "error", {"category": "workbench", "message": f"{exc}"[:500]}
-                    )
-                finally:
-                    self._sinks[sid].remove(queue)
+            try:
+                await self._load(sid)
+                await work()
+            except asyncio.CancelledError:
+                await asyncio.shield(self._stopped(sid))
+            except SessionNotFoundError:
+                raise
+            except Exception as exc:
+                await self._save(sid, status="idle")
+                await self._emit(sid, "error", {"category": "workbench", "message": f"{exc}"[:500]})
+            finally:
+                self._sinks[sid].remove(queue)
+                self._busy.discard(sid)
+                if self._running.get(sid) is task:
                     self._running.pop(sid, None)
 
         task = asyncio.ensure_future(run())
         task.add_done_callback(lambda _: queue.put_nowait(None))
         self._running[sid] = task
+        return self._drain(queue, task)
+
+    async def _stopped(self, sid: str) -> None:
+        await self._save(sid, status="stopped", pending=None)
+        await self._emit(sid, "limit", {"limit": "stopped", "message": "Stopped."})
+
+    @staticmethod
+    async def _drain(
+        queue: asyncio.Queue[Step | None], task: asyncio.Task[None]
+    ) -> AsyncIterator[Step]:
         while (step := await queue.get()) is not None:
             yield step
+        if not task.cancelled() and task.exception() is not None:
+            raise task.exception()  # type: ignore[misc]
+
+    def busy(self, sid: str) -> bool:
+        """Whether a turn or resume is running for the chat."""
+        return sid in self._busy
 
     def send(self, sid: str, text: str) -> AsyncIterator[Step]:
-        """Run one user turn and yield its steps.
+        """Start one user turn and return an iterator over its steps.
 
         While the chat awaits the user's answer to an agent question
         (pass-through), ``text`` goes straight to that agent on the same task.
 
         Raises:
-            SessionNotFoundError: if the chat does not exist.
+            TurnInProgressError: if a turn is already running for the chat.
+            SessionNotFoundError: (when iterating) if the chat does not exist.
         """
-        return self._stream(sid, lambda: self._turn(sid, text))
+        return self._start(sid, lambda: self._turn(sid, text))
 
     def resume(self, sid: str) -> AsyncIterator[Step]:
-        """Continue a chat paused for sign-in: read the task with GetTask and carry on."""
-        return self._stream(sid, lambda: self._resume(sid))
+        """Continue a chat paused for sign-in: read the task with GetTask and carry on.
+
+        Raises:
+            TurnInProgressError: if a turn is already running for the chat.
+        """
+        return self._start(sid, lambda: self._resume(sid))
 
     async def stop(self, sid: str) -> None:
         """Cancel the running turn (if any) and any sign-in watch; the chat becomes ``stopped``."""
@@ -474,7 +506,7 @@ class AssistantService:
             await self._append(sid, ChatMessage(role="assistant", tool_calls=tool_calls))
             await self._calls(sid, await self._tools(row), tool_calls, Limits(**row.limits))
 
-        async for step in self._stream(sid, work):
+        async for step in self._start(sid, work):
             yield step
 
     async def _calls(
@@ -898,7 +930,11 @@ class AssistantService:
                 return
             result = await self._executor.get_task(pause["agent_id"], pause["task_id"])
             if result.state and result.state != "auth_required":
+                try:
+                    steps = self.resume(sid)
+                except TurnInProgressError:
+                    continue
                 self._watchers.pop(sid, None)
-                async for _ in self.resume(sid):
+                async for _ in steps:
                     pass
                 return

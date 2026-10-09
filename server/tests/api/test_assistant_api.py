@@ -132,3 +132,11 @@ def test_errors(c, llm, zoo):
         ).status_code
         == 404
     )
+
+
+def test_second_message_while_running_is_409(c, llm, zoo):
+    s = _setup(c, llm, zoo, limits={"call_timeout_s": 30})
+    assert c.post(f"/api/assistant/sessions/{s['id']}/messages", json={"text": "slow 2"}).status_code == 202
+    r = c.post(f"/api/assistant/sessions/{s['id']}/messages", json={"text": "echo"})
+    assert r.status_code == 409 and r.json()["error"]["category"] == "workbench"
+    assert c.post(f"/api/assistant/sessions/{s['id']}/stop").status_code == 204
