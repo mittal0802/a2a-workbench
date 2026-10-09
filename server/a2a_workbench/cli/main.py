@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import contextlib
 import json
 import mimetypes
 import sys
@@ -44,6 +45,8 @@ providers_app = typer.Typer(no_args_is_help=True, help="API keys of the Assistan
 app.add_typer(providers_app, name="providers")
 chats_app = typer.Typer(no_args_is_help=True, help="Assistant chats: list, raw LLM calls, delete.")
 app.add_typer(chats_app, name="chats")
+push_app = typer.Typer(no_args_is_help=True, help="Push notification configs and deliveries.")
+app.add_typer(push_app, name="push")
 
 FaultsOpt = Annotated[
     str | None,
@@ -109,6 +112,7 @@ def serve(
 
     settings = Settings()
     bind_host, bind_port = host or settings.host, port or settings.port
+    settings.host, settings.port = bind_host, bind_port
     if open_browser:
         webbrowser.open(f"http://{bind_host}:{bind_port}")
     uvicorn.run(
@@ -276,6 +280,10 @@ def send(
     context_id: Annotated[str | None, typer.Option()] = None,
     task_id: Annotated[str | None, typer.Option()] = None,
     interface: Annotated[str | None, typer.Option(help="Interface URL to use.")] = None,
+    push: Annotated[
+        bool,
+        typer.Option("--push", help="Attach a Workbench webhook (task_push_notification_config)."),
+    ] = False,
     skill: Annotated[
         str | None,
         typer.Option(
@@ -316,6 +324,7 @@ def send(
         interface_url=interface,
         faults=profile.profile if profile else None,
         skill_id=skill,
+        push=push,
     )
 
     async def go() -> ExitCode:
@@ -1170,6 +1179,150 @@ def chats_delete(
 
     kind = _run(go())
     typer.echo(f"Deleted {kind} {chat_id}")
+
+
+async def _with_agent(target: str, as_json: bool, fn: Any) -> Any:
+    async with Workbench.open(Settings()) as wb:
+        agent = await _resolve_or_register(wb, target, as_json)
+        try:
+            return await fn(wb, agent)
+        except AgentCallError as exc:
+            _task_call_failed(exc, as_json)
+
+
+@push_app.command("create")
+def push_create(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: Annotated[str, typer.Argument(help="Task to be notified about.")],
+    url: Annotated[
+        str | None, typer.Option(help="Your own webhook URL (default: a Workbench webhook).")
+    ] = None,
+    token: Annotated[
+        str | None,
+        typer.Option(envvar="A2AW_PUSH_TOKEN", help="Config token ('-' reads stdin)."),
+    ] = None,
+    auth_scheme: Annotated[str | None, typer.Option(help="e.g. Bearer.")] = None,
+    auth_credentials: Annotated[
+        str | None,
+        typer.Option(envvar="A2AW_PUSH_CREDENTIALS", help="Credentials ('-' reads stdin)."),
+    ] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Create a push notification config for a task (A2A CreateTaskPushNotificationConfig)."""
+    from a2a_workbench.core.push.service import mask_config
+
+    token, auth_credentials = _secret(token), _secret(auth_credentials)
+
+    async def go(wb: Any, agent: Any) -> Any:
+        if url is None:
+            return await wb.push.create_workbench(agent.id, task_id)
+        config = await wb.push.create(
+            agent.id,
+            task_id,
+            url=url,
+            token=token,
+            auth_scheme=auth_scheme,
+            auth_credentials=auth_credentials,
+        )
+        return {"config": mask_config(config), "hook": None}
+
+    out = _run(_with_agent(target, as_json, go))
+    if as_json:
+        print_json(out)
+    else:
+        typer.echo(f"Created {out['config']['id']} → {out['config']['url']}")
+        if out.get("warning"):
+            typer.echo(f"warning: {out['warning']}", err=True)
+
+
+@push_app.command("list")
+def push_list(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: Annotated[str, typer.Argument()],
+    page_size: Annotated[int | None, typer.Option(min=1)] = None,
+    page_token: Annotated[str | None, typer.Option()] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """List a task's push notification configs (secrets masked)."""
+    out = _run(
+        _with_agent(
+            target,
+            as_json,
+            lambda wb, a: wb.push.list(a.id, task_id, page_size=page_size, page_token=page_token),
+        )
+    )
+    if as_json:
+        print_json(out)
+        return
+    for c in out["configs"]:
+        typer.echo(f"{c['id']}  {c['url']}")
+
+
+@push_app.command("get")
+def push_get(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: Annotated[str, typer.Argument()],
+    config_id: Annotated[str, typer.Argument()],
+    as_json: JsonFlag = False,
+) -> None:
+    """Show one push notification config (secrets masked)."""
+    out = _run(_with_agent(target, as_json, lambda wb, a: wb.push.get(a.id, task_id, config_id)))
+    print_json(out) if as_json else typer.echo(f"{out['id']}  {out['url']}")
+
+
+@push_app.command("delete")
+def push_delete(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    task_id: Annotated[str, typer.Argument()],
+    config_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Delete a push notification config (and the Workbench webhook behind it)."""
+    _run(_with_agent(target, False, lambda wb, a: wb.push.delete(a.id, task_id, config_id)))
+    typer.echo(f"Deleted {config_id}")
+
+
+def _delivery_line(d: Any) -> str:
+    why = f" ({', '.join(d.reasons)})" if d.reasons else ""
+    dup = " · duplicate" if d.duplicate else ""
+    return f"{d.received_at:%H:%M:%S}  {d.verdict}{why}  {d.kind or '-'}  {d.state or ''}{dup}"
+
+
+@push_app.command("deliveries")
+def push_deliveries(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Show notifications the agent sent to Workbench webhooks, newest first."""
+    out = _run(_with_agent(target, as_json, lambda wb, a: wb.receiver.deliveries(a.id)))
+    if as_json:
+        print_json([d.model_dump(mode="json") for d in out])
+        return
+    for d in out:
+        typer.echo(_delivery_line(d))
+
+
+@push_app.command("listen")
+def push_listen(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Print new deliveries as they arrive (needs `a2a-workbench serve` running) until Ctrl-C."""
+
+    async def go() -> None:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, as_json)
+            seen = {d.id for d in await wb.receiver.deliveries(agent.id)}
+            while True:
+                for d in reversed(await wb.receiver.deliveries(agent.id)):
+                    if d.id not in seen:
+                        seen.add(d.id)
+                        print_json(d.model_dump(mode="json")) if as_json else typer.echo(
+                            _delivery_line(d)
+                        )
+                await asyncio.sleep(1)
+
+    with contextlib.suppress(KeyboardInterrupt):
+        _run(go())
 
 
 def main() -> None:

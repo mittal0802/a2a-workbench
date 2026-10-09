@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -172,3 +173,40 @@ class AssistantStepRow(Base):
     kind: Mapped[str] = mapped_column(String(30))
     data: Mapped[dict[str, Any]] = mapped_column(JSON)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PushHook(Base):
+    __tablename__ = "push_hook"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    agent_id: Mapped[str] = mapped_column(String(32), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    task_id: Mapped[str | None] = mapped_column(String(200), index=True, default=None)
+    url: Mapped[str | None] = mapped_column(String(2000), default=None)
+    auth_scheme: Mapped[str] = mapped_column(String(30), default="Bearer")
+    credentials_hash: Mapped[str] = mapped_column(String(64))
+    token_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PushDelivery(Base):
+    __tablename__ = "push_delivery"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    hook_id: Mapped[str] = mapped_column(String(32), index=True)
+    agent_id: Mapped[str] = mapped_column(String(32), index=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    verdict: Mapped[str] = mapped_column(String(20))
+    reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    notes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    duplicate: Mapped[bool] = mapped_column(default=False)
+    kind: Mapped[str | None] = mapped_column(String(30), default=None)
+    task_id: Mapped[str | None] = mapped_column(String(200), default=None)
+    state: Mapped[str | None] = mapped_column(String(30), default=None)
+    headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    body: Mapped[str] = mapped_column(Text, default="")
+    body_hash: Mapped[str] = mapped_column(String(64), index=True)
+
+
+class WorkbenchSetting(Base):
+    __tablename__ = "workbench_setting"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(String(2000))

@@ -19,12 +19,14 @@ export function ChatView({
   conversationId,
   onConversationChange,
   onInspect,
+  active = true,
 }: {
   agent: Agent;
   prefill?: string;
   conversationId: string | null;
   onConversationChange: (id: string | null) => void;
   onInspect?: (exchangeId: string) => void;
+  active?: boolean;
 }) {
   const qc = useQueryClient();
   const conversations = useQuery({
@@ -36,7 +38,11 @@ export function ChatView({
     if (!conversationId && !userChoseNew && conversations.data?.length) onConversationChange(conversations.data[0].id);
   }, [conversationId, conversations.data, userChoseNew, onConversationChange]);
 
-  const { events, taskState } = useConversation(conversationId);
+  const { events, taskState, historySeq: loadedSeq } = useConversation(conversationId);
+  const createdHere = useRef(new Set<string>());
+  // Everything in a conversation this view just created is live, even if it is already
+  // in the first load.
+  const historySeq = conversationId && createdHere.current.has(conversationId) ? 0 : loadedSeq;
   const turns = buildTurns(events);
   const [signIn, setSignIn] = useState<{ index: number; action: "retry" | "continue"; reason?: string } | null>(null);
   const [prompted, setPrompted] = useState<Set<string>>(new Set());
@@ -44,16 +50,17 @@ export function ChatView({
   const authNeed =
     lastTurn?.kind === "agent"
       ? lastTurn.error?.category === "auth"
-        ? { action: "retry" as const, reason: lastTurn.error.message, key: `e${lastTurn.events.at(-1)?.seq}` }
+        ? { action: "retry" as const, reason: lastTurn.error.message, key: `e${lastTurn.events.at(-1)?.seq}`, seq: lastTurn.events.at(-1)?.seq ?? 0 }
         : lastTurn.current === "auth_required"
-          ? { action: "continue" as const, reason: undefined, key: `a${lastTurn.events.at(-1)?.seq}` }
+          ? { action: "continue" as const, reason: undefined, key: `a${lastTurn.events.at(-1)?.seq}`, seq: lastTurn.events.at(-1)?.seq ?? 0 }
           : null
       : null;
   useEffect(() => {
-    if (!authNeed || prompted.has(`${conversationId}:${authNeed.key}`)) return;
+    if (!authNeed || !active || historySeq === null || authNeed.seq <= historySeq) return;
+    if (prompted.has(`${conversationId}:${authNeed.key}`)) return;
     setPrompted((p) => new Set(p).add(`${conversationId}:${authNeed.key}`));
     setSignIn({ index: turns.length - 1, action: authNeed.action, reason: authNeed.reason });
-  }, [authNeed?.key, conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authNeed?.key, conversationId, active, historySeq]); // eslint-disable-line react-hooks/exhaustive-deps
   const retryTurn = (i: number) => {
     const prev = turns[i - 1];
     if (prev?.kind === "user")
@@ -73,6 +80,7 @@ export function ChatView({
       let id = conversationId;
       if (!id) {
         id = (await api.createConversation(agent.id)).id;
+        createdHere.current.add(id);
         onConversationChange(id);
         setUserChoseNew(false);
       }

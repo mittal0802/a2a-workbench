@@ -121,4 +121,17 @@ describe("AgentBubble sign-in prompts", () => {
     await user.click(screen.getByRole("button", { name: "Copy raw" }));
     expect(await navigator.clipboard.readText()).toBe("Streaming.");
   });
+  it("shows push notifications the agent delivered", async () => {
+    const user = userEvent.setup();
+    const turn = agentTurn([
+      ev(1, "task", { state: "working", task: { id: "t" } }),
+      ev(2, "push", { kind: "status_update", state: "completed", delivery_id: "d1", payload: { statusUpdate: { taskId: "t" } }, notes: [] }),
+    ]);
+    render(<AgentBubble turn={turn} agentName="Zoo" />);
+    const card = screen.getByTestId("push-d1");
+    expect(card.textContent).toMatch(/Notification/);
+    expect(card.textContent).toMatch(/Done/);
+    await user.click(screen.getByRole("button", { name: /notification/i }));
+    expect(card.textContent).toContain('"taskId": "t"');
+  });
 });

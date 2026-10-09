@@ -109,6 +109,25 @@ export function OptionsMenu({
             </div>
             <Switch label="Return immediately" checked={value.return_immediately} onCheckedChange={(v) => set({ return_immediately: v })} />
           </div>
+          <div className="opt">
+            <div>
+              Notify me by webhook (push)
+              <small>
+                {caps.pushNotifications
+                  ? "the agent POSTs task updates to a Workbench webhook"
+                  : "this agent's card does not declare push notifications"}
+              </small>
+            </div>
+            <Switch
+              label="Notify me by webhook (push)"
+              checked={!!value.push}
+              disabled={!caps.pushNotifications}
+              onCheckedChange={(v) => {
+                const { push: _drop, ...rest } = value;
+                onChange(v ? { ...rest, push: true } : rest);
+              }}
+            />
+          </div>
           <div style={{ padding: "4px 10px 8px" }}>
             <label className="lbl2" style={{ fontSize: 12 }}>
               History to include

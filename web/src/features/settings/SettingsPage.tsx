@@ -126,7 +126,63 @@ function ProviderCard({ info }: { info: ProviderInfo }) {
   );
 }
 
-/** Workbench settings: the Assistant's model providers and their API keys. */
+function WebhookSettings() {
+  const qc = useQueryClient();
+  const pub = useQuery({ queryKey: ["public-url"], queryFn: api.publicUrl });
+  const [url, setUrl] = useState("");
+  const update = (data: unknown) => qc.setQueryData(["public-url"], data);
+  const set = useMutation({ mutationFn: (v: string | null) => api.setPublicUrl(v), onSuccess: update });
+  const start = useMutation({ mutationFn: api.startTunnel, onSuccess: update });
+  const stop = useMutation({ mutationFn: api.stopTunnel, onSuccess: update });
+  const p = pub.data;
+  const err = set.error ?? start.error ?? stop.error;
+  return (
+    <section className="card" aria-label="Webhooks" style={{ marginBottom: 14 }}>
+      <div className="card-h">
+        <h3 style={{ fontSize: 14, fontWeight: 600 }}>Webhooks</h3>
+        <span className="spacer" />
+        {p && <span className="tag">{p.source === "local" ? "this machine only" : p.source === "tunnel" ? "tunnel" : "public URL"}</span>}
+      </div>
+      <div className="card-b">
+        <p className="no" style={{ fontSize: 12.5, marginBottom: 8 }}>
+          Agents send push notifications to this address. An agent on another machine cannot reach 127.0.0.1: give a public URL
+          that reaches this server, or open a Cloudflare quick tunnel.
+        </p>
+        <div className="mono" style={{ marginBottom: 8 }}>{p?.public_base_url ?? "…"}</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {p?.tunnel_running ? (
+            <button className="btn" onClick={() => stop.mutate()}>
+              Stop tunnel
+            </button>
+          ) : (
+            <button className="btn" onClick={() => start.mutate()} disabled={start.isPending || p?.cloudflared_installed === false} title={p?.cloudflared_installed === false ? "Install cloudflared first" : ""}>
+              {start.isPending ? "Starting…" : "Start tunnel"}
+            </button>
+          )}
+          {p?.cloudflared_installed === false && <span className="no" style={{ fontSize: 12 }}>cloudflared is not installed</span>}
+        </div>
+        <form
+          style={{ display: "flex", gap: 6, marginTop: 10 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            set.mutate(url.trim() || null);
+          }}
+        >
+          <input className="jsonedit" style={{ minHeight: 0, flex: 1 }} aria-label="Public URL" placeholder="https://workbench.example.com" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <button className="btn">Use</button>
+          {p?.source === "setting" && (
+            <button type="button" className="btn ghost" onClick={() => set.mutate(null)}>
+              Clear
+            </button>
+          )}
+        </form>
+        {err && <div className="err">{(err as Error).message}</div>}
+      </div>
+    </section>
+  );
+}
+
+/** Workbench settings: the Assistant's model providers and their API keys, and webhook reachability. */
 export function SettingsPage() {
   const providers = useQuery({ queryKey: ["assistant-providers"], queryFn: api.assistantProviders });
   return (
@@ -144,6 +200,8 @@ export function SettingsPage() {
         {providers.data?.map((p) => (
           <ProviderCard key={`${p.provider}-${p.source}-${p.preview ?? ""}`} info={p} />
         ))}
+        <h2 style={{ fontSize: 15, fontWeight: 600, margin: "18px 0 10px" }}>Push notifications</h2>
+        <WebhookSettings />
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ function setup() {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, "assistantProviders").mockResolvedValue(providers as never);
+  vi.spyOn(api, "publicUrl").mockResolvedValue({ public_base_url: "http://127.0.0.1:8484", source: "local", tunnel_running: false, cloudflared_installed: false } as never);
 });
 
 describe("SettingsPage", () => {
@@ -64,5 +65,19 @@ describe("SettingsPage", () => {
     expect(input).toHaveAttribute("type", "password");
     await userEvent.click(within(gemini).getByRole("button", { name: /show key/i }));
     expect(input).toHaveAttribute("type", "text");
+  });
+  it("shows the webhook address and starts a tunnel", async () => {
+    vi.spyOn(api, "publicUrl").mockResolvedValue({ public_base_url: "http://127.0.0.1:8484", source: "local", tunnel_running: false, cloudflared_installed: true } as never);
+    const start = vi.spyOn(api, "startTunnel").mockResolvedValue({ public_base_url: "https://x.trycloudflare.com", source: "tunnel", tunnel_running: true, cloudflared_installed: true } as never);
+    const set = vi.spyOn(api, "setPublicUrl").mockResolvedValue({ public_base_url: "https://hooks.example", source: "setting", tunnel_running: false, cloudflared_installed: true } as never);
+    setup();
+    const hooks = await screen.findByRole("region", { name: /webhooks/i });
+    expect(await within(hooks).findByText("http://127.0.0.1:8484")).toBeInTheDocument();
+    await userEvent.click(within(hooks).getByRole("button", { name: /start tunnel/i }));
+    expect(start).toHaveBeenCalled();
+    expect(await within(hooks).findByText("https://x.trycloudflare.com")).toBeInTheDocument();
+    await userEvent.type(within(hooks).getByLabelText(/public url/i), "https://hooks.example");
+    await userEvent.click(within(hooks).getByRole("button", { name: /^use$/i }));
+    expect(set).toHaveBeenCalledWith("https://hooks.example");
   });
 });

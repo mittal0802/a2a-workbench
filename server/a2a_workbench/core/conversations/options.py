@@ -4,7 +4,12 @@ from typing import Any
 
 from a2a.client import ClientCallContext
 from a2a.client.service_parameters import ServiceParametersFactory, with_a2a_extensions
-from a2a.types import Message, SendMessageConfiguration, SendMessageRequest
+from a2a.types import (
+    Message,
+    SendMessageConfiguration,
+    SendMessageRequest,
+    TaskPushNotificationConfig,
+)
 from pydantic import BaseModel, Field
 
 from a2a_workbench.core.faults.profile import FaultProfile
@@ -31,6 +36,8 @@ class SendOptions(BaseModel):
     Never sent: A2A messages have no skill field, and the agent decides which
     skill handles a request.
     """
+    push: bool = False
+    """Attach a Workbench webhook to the message (``task_push_notification_config``, A2A §3.2.2)."""
     inherit_ids: bool = True
     """Fill in the conversation's context id and open task id when the options omit them.
 
@@ -38,8 +45,14 @@ class SendOptions(BaseModel):
     """
 
 
-def build_request(message: Message, options: SendOptions) -> SendMessageRequest:
+def build_request(
+    message: Message,
+    options: SendOptions,
+    push_config: TaskPushNotificationConfig | None = None,
+) -> SendMessageRequest:
     """Return a ``SendMessageRequest`` for ``message`` configured by ``options``.
+
+    ``push_config`` becomes ``configuration.task_push_notification_config``.
 
     Message-level fields (metadata, extensions, reference task ids) are set on a
     copy of ``message``; ``message`` itself is not modified.
@@ -56,6 +69,8 @@ def build_request(message: Message, options: SendOptions) -> SendMessageRequest:
     )
     if options.history_length is not None:
         config.history_length = options.history_length
+    if push_config is not None:
+        config.task_push_notification_config.CopyFrom(push_config)
     request = SendMessageRequest(message=msg, configuration=config)
     if options.request_metadata:
         request.metadata.update(options.request_metadata)

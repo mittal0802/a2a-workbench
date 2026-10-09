@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTurns } from "./timeline";
+import { buildTurns, type AgentTurn } from "./timeline";
 import type { TimelineEvent } from "./types";
 
 const ev = (
@@ -103,5 +103,42 @@ describe("buildTurns", () => {
     if (agent.kind !== "agent") throw new Error();
     expect(agent.lost?.last_state).toBe("working");
     expect(agent.recovered?.snapshot_first).toBe(true);
+  });
+});
+
+describe("push events", () => {
+  it("attach to the agent turn and update its state", () => {
+    const ev = (seq: number, kind: string, data: Record<string, unknown>) =>
+      ({ conversation_id: "c", seq, kind, ts: "", task_id: "t", context_id: "x", exchange_id: null, data }) as never;
+    const turns = buildTurns([
+      ev(1, "user_message", { message: { parts: [] } }),
+      ev(2, "task", { state: "working", task: { id: "t" } }),
+      ev(3, "push", { kind: "status_update", state: "completed", delivery_id: "d1", payload: { statusUpdate: { taskId: "t" } } }),
+    ]);
+    const agent = turns[1] as AgentTurn;
+    expect(agent.pushes).toHaveLength(1);
+    expect(agent.current).toBe("completed");
+    expect(agent.states).toEqual(["working", "completed"]);
+  });
+});
+
+describe("push events of an earlier task", () => {
+  it("attach to that task's turn and never move a finished state back", () => {
+    const ev = (seq: number, kind: string, task: string | null, data: Record<string, unknown>) =>
+      ({ conversation_id: "c", seq, kind, ts: "", task_id: task, context_id: "x", exchange_id: null, data }) as never;
+    const turns = buildTurns([
+      ev(1, "user_message", null, { message: { parts: [] } }),
+      ev(2, "task", "A", { state: "working", task: { id: "A" } }),
+      ev(3, "user_message", null, { message: { parts: [] } }),
+      ev(4, "task", "B", { state: "completed", task: { id: "B" } }),
+      ev(5, "push", "A", { kind: "status_update", state: "completed", delivery_id: "d1" }),
+      ev(6, "push", "A", { kind: "status_update", state: "working", delivery_id: "d2" }),
+    ]);
+    const a = turns[1] as AgentTurn;
+    const b = turns[3] as AgentTurn;
+    expect(a.pushes.map((p) => p.data.delivery_id)).toEqual(["d1", "d2"]);
+    expect(a.current).toBe("completed");
+    expect(b.pushes).toEqual([]);
+    expect(b.current).toBe("completed");
   });
 });

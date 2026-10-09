@@ -22,7 +22,7 @@ function list(values: unknown): string {
 }
 
 /** Everything the agent card declares, in plain language, with the raw card on request. */
-export function AboutView({ agent, onTry }: { agent: Agent; onTry: (text: string) => void }) {
+export function AboutView({ agent, onTry, footer }: { agent: Agent; onTry: (text: string) => void; footer?: React.ReactNode }) {
   const [raw, setRaw] = useState(false);
   const [view, setView] = useState<"public" | "extended" | "diff">("public");
   const qc = useQueryClient();
@@ -160,7 +160,7 @@ export function AboutView({ agent, onTry }: { agent: Agent; onTry: (text: string
           <div className="card-h">
             Skills <small>· what you can ask it to do</small>
           </div>
-          <div className="card-b" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+          <div className="card-b" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
             {(card.skills ?? []).map((s: Record<string, any>) => (
               <div className="skill" key={s.id}>
                 <h4>
@@ -175,7 +175,7 @@ export function AboutView({ agent, onTry }: { agent: Agent; onTry: (text: string
                 {(s.tags ?? []).length > 0 && <p className="no">{s.tags.join(" · ")}</p>}
                 {(s.examples ?? []).map((ex: string) => (
                   <div key={ex}>
-                    <button className="try" onClick={() => onTry(ex)}>
+                    <button className="try" style={{ textAlign: "left" }} onClick={() => onTry(ex)}>
                       Try: “{ex}” →
                     </button>
                   </div>
@@ -218,6 +218,7 @@ export function AboutView({ agent, onTry }: { agent: Agent; onTry: (text: string
             </div>
           </div>
         </div>
+        {footer}
       </div>
     </section>
   );

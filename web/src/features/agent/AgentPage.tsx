@@ -9,12 +9,14 @@ import { InspectDrawer } from "../inspect/InspectDrawer";
 import { SecurityView } from "../security/SecurityView";
 import { TasksView } from "../tasks/TasksView";
 import { IntegrateView } from "../integrate/IntegrateView";
+import { NotificationsView } from "../notifications/NotificationsView";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ConnectionMenu } from "./ConnectionMenu";
 
 const TABS = [
   { id: "chat", label: "Chat" },
   { id: "tasks", label: "Tasks" },
+  { id: "notifications", label: "Notifications" },
   { id: "security", label: "Security" },
   { id: "integrate", label: "Integrate" },
   { id: "about", label: "About" },
@@ -89,6 +91,7 @@ export function AgentPage() {
         <section className={`view ${tab === "chat" ? "on" : ""}`}>
           <ChatView
             agent={a}
+            active={tab === "chat"}
             prefill={prefill}
             conversationId={conversationId}
             onConversationChange={changeConversation}
@@ -118,6 +121,11 @@ export function AgentPage() {
             <SecurityView agentId={a.id} />
           </section>
         )}
+        {tab === "notifications" && (
+          <section className="view on">
+            <NotificationsView agent={a} />
+          </section>
+        )}
         {tab === "integrate" && (
           <section className="view on">
             <IntegrateView agentId={a.id} />
@@ -130,8 +138,8 @@ export function AgentPage() {
               setPrefill(text);
               navigate(`/agents/${a.id}/chat`);
             }}
-          />
-          <div className="card" style={{ margin: "0 24px 24px", maxWidth: 940 }}>
+            footer={
+          <div className="card" style={{ marginTop: 24 }}>
             <div className="card-b" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ flex: 1 }}>
                 <b>Remove this agent</b>
@@ -143,7 +151,7 @@ export function AgentPage() {
                 label="Remove agent"
                 question={`Remove ${a.name}?`}
                 confirmLabel="Remove"
-                className="btn ghost"
+                className="btn danger-outline"
                 onConfirm={() =>
                   api.deleteAgent(a.id).then(() => {
                     qc.invalidateQueries({ queryKey: ["agents"] });
@@ -155,6 +163,8 @@ export function AgentPage() {
               </ConfirmButton>
             </div>
           </div>
+            }
+          />
         </section>
       </div>
     </>

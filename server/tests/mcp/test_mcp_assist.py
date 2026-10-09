@@ -74,3 +74,26 @@ async def test_mcp_delete_tools(zoo):
         assert out == {"deleted": sent["conversation_id"]}
         missing = await call(c, "delete_assistant_chat", {"session_id": "nope"})
         assert missing["error"]["category"] == "workbench"
+
+
+async def test_mcp_push_tools(zoo):
+    async with connected() as c:
+        names = {t.name for t in (await c.list_tools()).tools}
+        assert {"push_create", "push_get", "push_list", "push_delete", "push_deliveries"} <= names
+        sent = await call(
+            c,
+            "send_message",
+            {"agent": zoo.base_url, "text": "slow 20", "stream": False, "return_immediately": True},
+        )
+        task = next(e["task_id"] for e in sent["events"] if e["task_id"])
+        created = await call(c, "push_create", {"agent": zoo.base_url, "task_id": task})
+        cid = created["config"]["id"]
+        listed = await call(c, "push_list", {"agent": zoo.base_url, "task_id": task})
+        assert [x["id"] for x in listed["configs"]] == [cid]
+        assert (
+            await call(c, "push_get", {"agent": zoo.base_url, "task_id": task, "config_id": cid})
+        )["id"] == cid
+        assert (
+            await call(c, "push_delete", {"agent": zoo.base_url, "task_id": task, "config_id": cid})
+        ) == {"deleted": cid}
+        assert (await call(c, "push_deliveries", {"agent": zoo.base_url}))["deliveries"] == []

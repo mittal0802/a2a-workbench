@@ -66,7 +66,8 @@ class RecordingScope:
     """Labels attached to exchanges recorded while the scope is active.
 
     ``redact_fields`` names form or JSON body fields whose values are masked
-    in the recorded request and response bodies.
+    in the recorded request and response bodies (at any depth); ``secrets``
+    are values masked wherever they appear in bodies and stream frames.
     """
 
     operation: str
@@ -74,6 +75,7 @@ class RecordingScope:
     conversation_id: str | None = None
     exchange_ids: list[str] = field(default_factory=list)
     redact_fields: frozenset[str] = frozenset()
+    secrets: tuple[str, ...] = ()
 
 
 _current_scope: ContextVar[RecordingScope | None] = ContextVar("a2aw_recording_scope", default=None)
@@ -86,9 +88,12 @@ def recording_scope(
     agent_id: str | None = None,
     conversation_id: str | None = None,
     redact_fields: frozenset[str] = frozenset(),
+    secrets: tuple[str, ...] = (),
 ) -> Iterator[RecordingScope]:
     """Label exchanges recorded in this context and collect their ids."""
-    scope = RecordingScope(operation, agent_id, conversation_id, redact_fields=redact_fields)
+    scope = RecordingScope(
+        operation, agent_id, conversation_id, redact_fields=redact_fields, secrets=secrets
+    )
     token = _current_scope.set(scope)
     try:
         yield scope
@@ -149,12 +154,39 @@ def redact_body(body: str | None, fields: frozenset[str]) -> str | None:
         value = json.loads(body)
     except ValueError:
         value = None
-    if isinstance(value, dict):
-        return json.dumps({k: (REDACTED if k in fields else v) for k, v in value.items()})
+    if isinstance(value, dict | list):
+
+        def walk(node: Any) -> Any:
+            if isinstance(node, dict):
+                return {k: (REDACTED if k in fields else walk(v)) for k, v in node.items()}
+            if isinstance(node, list):
+                return [walk(v) for v in node]
+            return node
+
+        return json.dumps(walk(value))
     if "=" in body and "\n" not in body:
         pairs = parse_qsl(body, keep_blank_values=True)
         return urlencode([(k, REDACTED if k in fields else v) for k, v in pairs], safe=REDACTED)
     return body
+
+
+def scrub_exchange(exchange: "Exchange") -> None:
+    """Apply the active scope's field redaction and secret masking to ``exchange`` in place."""
+    scope = _current_scope.get()
+    if scope is None or not (scope.redact_fields or scope.secrets):
+        return
+
+    def clean(text: str | None) -> str | None:
+        text = redact_body(text, scope.redact_fields)
+        for secret in scope.secrets:
+            if text and secret:
+                text = text.replace(secret, REDACTED)
+        return text
+
+    exchange.request_body = clean(exchange.request_body)
+    exchange.response_body = clean(exchange.response_body)
+    for frame in exchange.frames:
+        frame.data = clean(frame.data) or ""
 
 
 def current_operation() -> str | None:

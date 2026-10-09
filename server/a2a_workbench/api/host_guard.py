@@ -31,7 +31,8 @@ class HostGuardMiddleware:
 
     HTTP requests get 400 for a foreign Host and 403 for a foreign Origin;
     WebSocket handshakes from either are closed before acceptance. ``"*"`` in
-    the allowed set disables the check.
+    the allowed set disables the check. ``POST /hooks/*`` (agent webhooks, which
+    authenticate every request themselves) is always let through.
     """
 
     def __init__(self, app: ASGIApp, hosts: frozenset[str]) -> None:
@@ -39,7 +40,12 @@ class HostGuardMiddleware:
         self.hosts = hosts
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in ("http", "websocket") or "*" in self.hosts:
+        hook = (
+            scope["type"] == "http"
+            and scope.get("method") == "POST"
+            and str(scope.get("path", "")).startswith("/hooks/")
+        )
+        if scope["type"] not in ("http", "websocket") or "*" in self.hosts or hook:
             await self.app(scope, receive, send)
             return
         headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}

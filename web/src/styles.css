@@ -329,3 +329,5 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .convs .conv{display:inline-flex;align-items:center}
 .convs .conv .ib{padding:2px 6px;opacity:.55}
 .convs .conv:hover .ib{opacity:1}
+.btn.danger-outline{color:var(--red);border:1px solid var(--red-soft);background:transparent}
+.btn.danger-outline:hover{background:var(--red-soft)}

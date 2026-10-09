@@ -96,18 +96,25 @@ class TaskService:
         self._auth = auth
 
     @asynccontextmanager
-    async def _client(
+    async def client_for(
         self,
         agent_id: str,
         operation: str,
-        faults: FaultProfile | FaultInjector | None,
+        faults: FaultProfile | FaultInjector | None = None,
         *,
         streaming: bool = False,
+        redact_fields: frozenset[str] = frozenset(),
     ) -> AsyncIterator[tuple[Client, Any]]:
+        """Yield an SDK client for the agent's selected interface and the call context.
+
+        The context carries the agent's credentials; calls are recorded under
+        ``operation`` with ``redact_fields`` masked in bodies. Failures are
+        raised as ``AgentCallError``.
+        """
         agent = await self._agents.row(agent_id)
         card = card_from_json(agent.card)
         plan = await self._auth.plan(agent_id, card) if self._auth else AuthPlan()
-        with recording_scope(operation, agent_id=agent_id):
+        with recording_scope(operation, agent_id=agent_id, redact_fields=redact_fields):
             try:
                 iface = select_interface(card, agent.selected_interface_url)
                 client = await open_client(
@@ -132,7 +139,7 @@ class TaskService:
         req = GetTaskRequest(id=task_id)
         if history_length is not None:
             req.history_length = history_length
-        async with self._client(agent_id, "get_task", faults) as (client, ctx):
+        async with self.client_for(agent_id, "get_task", faults) as (client, ctx):
             return _task_json(await client.get_task(req, context=ctx))
 
     async def list(
@@ -143,7 +150,7 @@ class TaskService:
         faults: FaultProfile | FaultInjector | None = None,
     ) -> dict[str, Any]:
         """Return ``{"tasks", "next_page_token", "page_size", "total_size"}`` for ``f``."""
-        async with self._client(agent_id, "list_tasks", faults) as (client, ctx):
+        async with self.client_for(agent_id, "list_tasks", faults) as (client, ctx):
             resp = await client.list_tasks(_list_request(f), context=ctx)
         return {
             "tasks": [_task_json(t) for t in resp.tasks],
@@ -164,14 +171,14 @@ class TaskService:
         req = CancelTaskRequest(id=task_id)
         if metadata:
             req.metadata.update(metadata)
-        async with self._client(agent_id, "cancel_task", faults) as (client, ctx):
+        async with self.client_for(agent_id, "cancel_task", faults) as (client, ctx):
             return _task_json(await client.cancel_task(req, context=ctx))
 
     async def subscribe(
         self, agent_id: str, task_id: str, *, faults: FaultProfile | FaultInjector | None = None
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield ``{"kind", "state", "event"}`` for each event of the resubscribed stream."""
-        async with self._client(agent_id, "subscribe_task", faults, streaming=True) as (
+        async with self.client_for(agent_id, "subscribe_task", faults, streaming=True) as (
             client,
             ctx,
         ):

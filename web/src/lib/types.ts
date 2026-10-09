@@ -78,7 +78,7 @@ export type ErrorData = {
 export type TimelineEvent = {
   conversation_id: string;
   seq: number;
-  kind: "user_message" | "message" | "task" | "status" | "artifact" | "error" | "connection_lost" | "recovered";
+  kind: "user_message" | "message" | "task" | "status" | "artifact" | "error" | "connection_lost" | "recovered" | "push";
   ts: string;
   task_id: string | null;
   context_id: string | null;
@@ -121,6 +121,7 @@ export type SendOptions = {
   reference_task_ids: string[];
   faults: FaultProfile | null;
   skill_id?: string;
+  push?: boolean;
 };
 export type FaultRule = { kind: string; mode?: string; probability?: number; params?: Record<string, unknown>; match?: Record<string, unknown> };
 export type FaultProfile = { name?: string; description?: string; rules: FaultRule[]; seed?: number };
@@ -261,3 +262,31 @@ export type NewAssistantSession = {
   agent_ids: string[];
   title?: string;
 };
+
+export type PushConfig = {
+  id: string;
+  taskId?: string;
+  url: string;
+  token?: string;
+  authentication?: { scheme: string; credentials?: string };
+};
+export type PushDelivery = {
+  id: string;
+  hook_id: string;
+  agent_id: string;
+  received_at: string;
+  verdict: "accepted" | "rejected";
+  reasons: string[];
+  notes: string[];
+  duplicate: boolean;
+  kind: string | null;
+  task_id: string | null;
+  state: string | null;
+  headers: Record<string, string>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: Record<string, any> | null;
+};
+export type PublicUrl = { public_base_url: string; source: "setting" | "tunnel" | "local"; tunnel_running: boolean; cloudflared_installed: boolean };
+export type NewPushConfig =
+  | { webhook: "workbench" }
+  | { webhook: "custom"; url: string; token?: string; auth_scheme?: string; auth_credentials?: string };

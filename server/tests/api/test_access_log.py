@@ -36,3 +36,12 @@ def test_serve_installs_the_filter(monkeypatch):
     access = seen["log_config"]["handlers"]["access"]
     assert "redact_oauth" in access["filters"]
     assert seen["log_config"] == log_config()
+
+
+def test_serve_binds_the_settings_to_its_host_and_port(monkeypatch):
+    seen = {}
+    monkeypatch.setattr("uvicorn.run", lambda app, **k: seen.update(app=app, **k))
+    assert CliRunner().invoke(app, ["serve", "--port", "8599"]).exit_code == 0
+    wb = seen["app"].state.workbench
+    assert seen["port"] == 8599 and wb.settings.port == 8599
+    assert wb._own_url() == "http://127.0.0.1:8599"

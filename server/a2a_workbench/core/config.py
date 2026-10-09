@@ -10,7 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Configuration read from ``A2AW_*`` environment variables.
 
-    ``database_url`` also accepts the conventional unprefixed ``DATABASE_URL``.
+    ``database_url`` also accepts the conventional unprefixed ``DATABASE_URL`` and
+    ``public_base_url`` the unprefixed ``PUBLIC_BASE_URL``.
     """
 
     model_config = SettingsConfigDict(env_prefix="A2AW_", extra="ignore", populate_by_name=True)
@@ -26,6 +27,10 @@ class Settings(BaseSettings):
     max_recorded_body_bytes: int = 1024 * 1024
     allowed_hosts: str = ""
     secret_key: str | None = None
+    public_base_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("A2AW_PUBLIC_BASE_URL", "PUBLIC_BASE_URL")
+    )
+    """Base URL agents use to reach this server's webhooks (``/hooks/<id>``)."""
 
     @property
     def extra_allowed_hosts(self) -> list[str]:

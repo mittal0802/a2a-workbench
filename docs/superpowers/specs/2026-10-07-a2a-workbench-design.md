@@ -218,8 +218,10 @@ a2a-workbench/
 ### 5.4 `push/`
 
 - Endpoint `POST /hooks/{hook_id}` receives notifications, validates the
-  configured token (`A2A-Notification-Token`) and the authentication info, and
-  emits a `push` timeline event to the conversation that owns the task.
+  authentication info (`Authorization`, A2A §4.3.3) and the configured token
+  (sent by the SDK as `X-A2A-Notification-Token`; A2A does not name the header,
+  see `docs/upstream-gaps.md`), and emits a `push` timeline event to the
+  conversation that owns the task.
 - **Public URL:** in local mode, an optional tunnel (`cloudflared` quick tunnel
   if it is installed, or a user-supplied `PUBLIC_BASE_URL`); in the hosted
   instance, the server's own public URL.

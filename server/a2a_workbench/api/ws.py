@@ -2,9 +2,9 @@
 
 Client messages: ``{"op": "subscribe", "topic": ..., "after_seq": n}`` and
 ``{"op": "unsubscribe", "topic": ...}``. Topics are ``conversation:<id>``,
-``exchanges:<id>`` and ``assistant:<id>``. For conversation and assistant
-topics, events (steps) with ``seq > after_seq`` are delivered exactly once and
-in order, first from storage, then live.
+``exchanges:<id>``, ``assistant:<id>`` and ``push:<agent_id>`` (deliveries).
+For conversation and assistant topics, events (steps) with ``seq > after_seq``
+are delivered exactly once and in order, first from storage, then live.
 """
 
 import asyncio
@@ -16,7 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from a2a_workbench.core.workbench import Workbench
 
 router = APIRouter()
-TOPIC_PREFIXES = ("conversation:", "exchanges:", "assistant:")
+TOPIC_PREFIXES = ("conversation:", "exchanges:", "assistant:", "push:")
 
 
 async def _pump(ws: WebSocket, wb: Workbench, topic: str, after_seq: int) -> None:

@@ -10,7 +10,7 @@ vi.mock("../chat/ChatView", () => ({
   ChatView: ({ conversationId }: { conversationId: string | null }) => <div>chat:{conversationId ?? "none"}</div>,
 }));
 vi.mock("../inspect/InspectDrawer", () => ({ InspectDrawer: () => null }));
-vi.mock("../about/AboutView", () => ({ AboutView: () => <div>about</div> }));
+vi.mock("../about/AboutView", () => ({ AboutView: ({ footer }: { footer?: React.ReactNode }) => <div>about{footer}</div> }));
 
 describe("AgentPage", () => {
   it("opens the conversation named in the URL", async () => {
