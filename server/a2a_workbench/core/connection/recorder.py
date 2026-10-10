@@ -204,6 +204,12 @@ def scrub_exchange(exchange: "Exchange") -> None:
         frame.data = clean(frame.data) or ""
 
 
+def current_exchange_ids() -> list[str]:
+    """Ids of the exchanges recorded so far in the active scope (empty outside one)."""
+    scope = _current_scope.get()
+    return list(scope.exchange_ids) if scope else []
+
+
 def current_operation() -> str | None:
     """Return the operation label of the active recording scope, if any."""
     scope = _current_scope.get()

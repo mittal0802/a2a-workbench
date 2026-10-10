@@ -337,6 +337,7 @@ def build_zoo_app(
     extended_configured: bool = True,
     push: bool = True,
     breaks: frozenset[str] = frozenset(),
+    streaming: bool = True,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
@@ -357,6 +358,7 @@ def build_zoo_app(
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
     card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
     card.capabilities.push_notifications = push
+    card.capabilities.streaming = streaming
     apply_card_breaks(card, breaks, base_url)
     schemes, requirements = security_for(auth, idp.issuer if idp else None)
     for name, scheme in schemes.items():

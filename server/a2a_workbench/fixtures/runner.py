@@ -37,6 +37,7 @@ class ZooServer:
         extended_configured: bool = True,
         push: bool = True,
         breaks: frozenset[str] | set[str] = frozenset(),
+        streaming: bool = True,
     ) -> None:
         self.host = host
         self.port = port or free_port(host)
@@ -54,6 +55,7 @@ class ZooServer:
             extended_configured=extended_configured,
             push=push,
             breaks=frozenset(breaks),
+            streaming=streaming,
         )
         self._server = uvicorn.Server(
             uvicorn.Config(app, host=host, port=self.port, log_level="warning", lifespan="on")

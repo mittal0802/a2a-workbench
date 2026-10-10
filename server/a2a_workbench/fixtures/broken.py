@@ -6,11 +6,29 @@ request handler that bends one behaviour; executor breaks change what the zoo
 agent does.
 """
 
+import asyncio
+import inspect
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers.default_request_handler_v2 import DefaultRequestHandlerV2
-from a2a.types import AgentCard, AgentInterface, Message, SendMessageRequest, Task, TaskState
+from a2a.types import (
+    AgentCard,
+    AgentInterface,
+    CancelTaskRequest,
+    GetTaskRequest,
+    ListTasksRequest,
+    ListTasksResponse,
+    Message,
+    SendMessageRequest,
+    SubscribeToTaskRequest,
+    Task,
+    TaskState,
+    TaskStatus,
+    TaskStatusUpdateEvent,
+)
+from a2a.utils.errors import TaskNotFoundError
 
 TERMINAL = {
     TaskState.TASK_STATE_COMPLETED,
@@ -35,6 +53,18 @@ BREAKS: dict[str, str] = {
     "history-ignored": "historyLength is ignored (A2A §3.2.4)",
     "blocking-working": "blocking sends return before the task settles (A2A §3.2.2)",
     "message-output": "results returned only in messages (A2A §3.7)",
+    "get-unknown-returns": "GetTask invents a task for an unknown id (A2A §3.1.3)",
+    "get-history-ignored": "GetTask ignores historyLength (A2A §3.2.4)",
+    "list-ignores-context": "ListTasks ignores the contextId filter (A2A §3.1.4)",
+    "list-artifacts": "ListTasks includes artifacts without includeArtifacts (A2A §3.1.4)",
+    "list-order": "ListTasks oldest first (A2A §3.1.4)",
+    "cancel-terminal-ok": "canceling a finished task succeeds (A2A §3.1.5)",
+    "cancel-unknown-ok": "CancelTask invents a task for an unknown id (A2A §3.1.5)",
+    "stream-status-first": "a stream that starts with a status update (A2A §3.1.2)",
+    "stream-no-close": "a stream left open after the task finished (A2A §3.1.2)",
+    "subscribe-no-task-first": "SubscribeToTask without the Task first (A2A §3.1.6)",
+    "subscribe-terminal-ok": "SubscribeToTask streams a finished task (A2A §3.1.6)",
+    "streaming-undeclared-works": "streams although capabilities.streaming is false (A2A §3.3.4)",
 }
 
 
@@ -102,3 +132,91 @@ class BrokenHandler(DefaultRequestHandlerV2):
         if "extended-ignores-capability" in self.breaks:
             return self.extended_agent_card or self._agent_card
         return await super().on_get_extended_agent_card(params, context)
+
+    async def on_get_task(self, params: GetTaskRequest, context: ServerCallContext) -> Task:
+        """GetTask, inventing unknown tasks or ignoring historyLength as configured."""
+        if "get-history-ignored" in self.breaks:
+            params.ClearField("history_length")
+        try:
+            return await super().on_get_task(params, context)
+        except TaskNotFoundError:
+            if "get-unknown-returns" in self.breaks:
+                return _invented(params.id, TaskState.TASK_STATE_COMPLETED)
+            raise
+
+    async def on_list_tasks(
+        self, params: ListTasksRequest, context: ServerCallContext
+    ) -> ListTasksResponse:
+        """ListTasks, ignoring filters, leaking artifacts or reversing order as configured."""
+        if "list-ignores-context" in self.breaks:
+            params.ClearField("context_id")
+        if "list-artifacts" in self.breaks:
+            params.include_artifacts = True
+        page = await super().on_list_tasks(params, context)
+        if "list-order" in self.breaks:
+            tasks = list(page.tasks)[::-1]
+            del page.tasks[:]
+            page.tasks.extend(tasks)
+        return page
+
+    async def on_cancel_task(self, params: CancelTaskRequest, context: ServerCallContext) -> Task:
+        """CancelTask, accepting finished or unknown tasks as configured."""
+        task = await self.task_store.get(params.id, context)
+        if task is None and "cancel-unknown-ok" in self.breaks:
+            return _invented(params.id, TaskState.TASK_STATE_CANCELED)
+        if (
+            task is not None
+            and task.status.state in TERMINAL
+            and "cancel-terminal-ok" in self.breaks
+        ):
+            return task
+        return await super().on_cancel_task(params, context)
+
+    async def on_message_send_stream(
+        self, params: SendMessageRequest, context: ServerCallContext
+    ) -> AsyncGenerator[Any, None]:
+        """Stream, starting with a status update or staying open as configured."""
+        first = True
+        source = (
+            inspect.unwrap(DefaultRequestHandlerV2.on_message_send_stream)(self, params, context)
+            if "streaming-undeclared-works" in self.breaks
+            else super().on_message_send_stream(params, context)
+        )
+        async for event in source:
+            if first and isinstance(event, Task) and "stream-status-first" in self.breaks:
+                yield TaskStatusUpdateEvent(
+                    task_id=event.id, context_id=event.context_id, status=event.status
+                )
+            first = False
+            yield event
+            if "stream-no-close" in self.breaks and _terminal_event(event):
+                await asyncio.sleep(20)
+
+    async def on_subscribe_to_task(
+        self, params: SubscribeToTaskRequest, context: ServerCallContext
+    ) -> AsyncGenerator[Any, None]:
+        """Subscribe, dropping the first Task or streaming finished tasks as configured."""
+        task = await self.task_store.get(params.id, context)
+        if (
+            task is not None
+            and task.status.state in TERMINAL
+            and "subscribe-terminal-ok" in self.breaks
+        ):
+            yield task
+            return
+        first = True
+        async for event in super().on_subscribe_to_task(params, context):
+            if first and isinstance(event, Task) and "subscribe-no-task-first" in self.breaks:
+                first = False
+                continue
+            first = False
+            yield event
+
+
+def _invented(task_id: str, state: Any) -> Task:
+    return Task(id=task_id, context_id="invented", status=TaskStatus(state=state))
+
+
+def _terminal_event(event: Any) -> bool:
+    status = getattr(event, "status", None)
+    return status is not None and status.state in TERMINAL
