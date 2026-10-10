@@ -13,6 +13,7 @@ from a2a_workbench.core.bus import EventBus
 from a2a_workbench.core.config import Settings
 from a2a_workbench.core.conversations.service import ConversationService
 from a2a_workbench.core.exchanges import ExchangeStore
+from a2a_workbench.core.health.runner import HealthService
 from a2a_workbench.core.integrate.service import IntegrationService
 from a2a_workbench.core.kv import SettingsStore
 from a2a_workbench.core.push.hooks import HookStore
@@ -51,6 +52,7 @@ class Workbench:
         self.receiver = Receiver(self.db, self.hooks, self.conversations, self.bus)
         self.assistant = AssistantService(self)
         self.integrate = IntegrationService(self.agents)
+        self.health = HealthService(self)
 
     async def _hook_base(self) -> str:
         return (await self.public_url())[0]

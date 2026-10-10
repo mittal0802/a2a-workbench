@@ -76,6 +76,15 @@ class RecordingScope:
     exchange_ids: list[str] = field(default_factory=list)
     redact_fields: frozenset[str] = frozenset()
     secrets: tuple[str, ...] = ()
+    parent: "RecordingScope | None" = None
+
+    def add(self, exchange_id: str) -> None:
+        """Record ``exchange_id`` in this scope and every enclosing scope."""
+        scope: RecordingScope | None = self
+        while scope is not None:
+            if exchange_id not in scope.exchange_ids:
+                scope.exchange_ids.append(exchange_id)
+            scope = scope.parent
 
 
 _current_scope: ContextVar[RecordingScope | None] = ContextVar("a2aw_recording_scope", default=None)
@@ -91,8 +100,14 @@ def recording_scope(
     secrets: tuple[str, ...] = (),
 ) -> Iterator[RecordingScope]:
     """Label exchanges recorded in this context and collect their ids."""
+    parent = _current_scope.get()
     scope = RecordingScope(
-        operation, agent_id, conversation_id, redact_fields=redact_fields, secrets=secrets
+        operation,
+        agent_id,
+        conversation_id,
+        redact_fields=redact_fields | (parent.redact_fields if parent else frozenset()),
+        secrets=secrets + (parent.secrets if parent else ()),
+        parent=parent,
     )
     token = _current_scope.set(scope)
     try:
@@ -352,7 +367,7 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             conversation_id=scope.conversation_id if scope else None,
         )
         if scope:
-            scope.exchange_ids.append(exchange.id)
+            scope.add(exchange.id)
         started = time.perf_counter()
         try:
             response = await self._inner.handle_async_request(request)

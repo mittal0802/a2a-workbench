@@ -1,5 +1,7 @@
 """Construction of A2A SDK clients for a chosen agent interface."""
 
+from contextvars import ContextVar
+
 from a2a.client import Client, ClientConfig, ClientFactory
 from a2a.types import AgentCard, AgentInterface
 
@@ -31,8 +33,12 @@ def _rank(iface: AgentInterface) -> tuple[int, int]:
     return binding, 0 if iface.protocol_version == "1.0" else 1
 
 
+interface_override: ContextVar[str | None] = ContextVar("a2aw_interface_override", default=None)
+"""When set, ``select_interface`` uses this interface URL instead of the one asked for."""
+
+
 def select_interface(card: AgentCard, url: str | None) -> AgentInterface:
-    """Return the interface at ``url``, or the preferred one when ``url`` is None.
+    """Return the interface at ``url`` (or ``interface_override``), else the preferred one.
 
     Preference: JSON-RPC, then HTTP+JSON, then gRPC; protocol version 1.0 first;
     otherwise card order.
@@ -41,6 +47,7 @@ def select_interface(card: AgentCard, url: str | None) -> AgentInterface:
         InterfaceNotFoundError: if ``url`` matches no interface, or the card has none.
     """
     interfaces = list(card.supported_interfaces)
+    url = interface_override.get() or url
     if url is not None:
         for iface in interfaces:
             if iface.url == url:
