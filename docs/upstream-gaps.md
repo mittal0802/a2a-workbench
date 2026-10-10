@@ -35,3 +35,10 @@ Entry format:
 - Why we need it: a receiver cannot validate the token interoperably, so the Workbench treats a missing token as a note and only `Authorization` (which §4.3.3 does define) as a requirement.
 - Proposal: name the header (for example `A2A-Notification-Token`, matching the `A2A-Version` style) in §4.3.3 and in each binding section, and state whether receivers MUST check it.
 - Status: open.
+
+## The server handler does not enforce required extensions
+- Where: SDK (`a2a-python` 1.2.2, `DefaultRequestHandlerV2`)
+- Missing: A2A §3.3.4 says an agent MUST answer `ExtensionSupportRequiredError` when a client does not activate an extension the card marks `required: true`. The SDK defines the error and its mappings but never raises it: the request handler does not compare `ServerCallContext.requested_extensions` with the card's required extensions, so every SDK-based agent accepts such requests unless its executor checks by hand.
+- Why we need it: health check J1 expects the rule; the zoo enforces it in its executor (`required_extension=True`) to stay conformant.
+- Proposal: in `DefaultRequestHandlerV2`, before dispatching any request, raise `ExtensionSupportRequiredError` listing the required extension URIs missing from `context.requested_extensions` (opt-out flag for agents that negotiate per skill).
+- Status: open.

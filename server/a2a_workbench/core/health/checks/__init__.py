@@ -2,7 +2,11 @@
 
 from a2a_workbench.core.health.checks import (  # noqa: F401
     discovery,
+    errors,
+    extensions,
     messaging,
+    push,
+    security,
     streaming,
     tasks,
     transport,

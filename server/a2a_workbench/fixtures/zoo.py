@@ -58,6 +58,7 @@ from a2a_workbench.fixtures.auth import ZooAuthMiddleware, ZooGrpcAuthIntercepto
 from a2a_workbench.fixtures.broken import (
     BREAKS,
     BrokenHandler,
+    BrokenPushSender,
     apply_card_breaks,
     tamper_signed_card,
 )
@@ -113,11 +114,26 @@ class ZooExecutor(AgentExecutor):
     ``fixtures.broken``) changes behaviour on purpose.
     """
 
-    def __init__(self, breaks: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self, breaks: frozenset[str] = frozenset(), *, required_extension: bool = False
+    ) -> None:
         self.breaks = breaks
+        self.required_extension = required_extension
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Run the behaviour selected by the user text and publish its events."""
+        """Run the behaviour selected by the user text and publish its events.
+
+        With ``required_extension``, a request that does not activate the zoo
+        extension is refused with ExtensionSupportRequiredError (A2A §3.3.4).
+        """
+        if (
+            self.required_extension
+            and "extension-not-enforced" not in self.breaks
+            and ZOO_EXTENSION not in context.requested_extensions
+        ):
+            from a2a.utils.errors import ExtensionSupportRequiredError
+
+            raise ExtensionSupportRequiredError(message=f"activate {ZOO_EXTENSION}")
         text = context.get_user_input().strip()
         word, _, rest = text.partition(" ")
         word = word.lower()
@@ -338,6 +354,7 @@ def build_zoo_app(
     push: bool = True,
     breaks: frozenset[str] = frozenset(),
     streaming: bool = True,
+    required_extension: bool = False,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
@@ -359,6 +376,15 @@ def build_zoo_app(
     card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
     card.capabilities.push_notifications = push
     card.capabilities.streaming = streaming
+    if required_extension:
+        card.capabilities.extensions[0].required = True
+    if "auth-not-enforced" in breaks and auth == "none":
+        from a2a.types import HTTPAuthSecurityScheme, SecurityScheme
+
+        card.security_schemes["bearer"].CopyFrom(
+            SecurityScheme(http_auth_security_scheme=HTTPAuthSecurityScheme(scheme="Bearer"))
+        )
+        card.security_requirements.append(SecurityRequirement(schemes={"bearer": StringList()}))
     apply_card_breaks(card, breaks, base_url)
     schemes, requirements = security_for(auth, idp.issuer if idp else None)
     for name, scheme in schemes.items():
@@ -411,10 +437,13 @@ def build_zoo_app(
             examples=["echo visa"],
         )
     )
-    push_store = InMemoryPushNotificationConfigStore() if push else None
+    push_store = (
+        InMemoryPushNotificationConfigStore() if push or "push-undeclared-works" in breaks else None
+    )
+    sender_class = BrokenPushSender if "push-no-auth" in breaks else BasePushNotificationSender
     handler = BrokenHandler(
         breaks=breaks,
-        agent_executor=ZooExecutor(breaks),
+        agent_executor=ZooExecutor(breaks, required_extension=required_extension),
         task_store=InMemoryTaskStore(),
         agent_card=card,
         extended_agent_card=(
@@ -422,7 +451,7 @@ def build_zoo_app(
         ),
         push_config_store=push_store,
         push_sender=(
-            BasePushNotificationSender(httpx.AsyncClient(timeout=10), push_store) if push else None
+            sender_class(httpx.AsyncClient(timeout=10), push_store) if push_store else None
         ),
     )
 
@@ -464,5 +493,7 @@ def build_zoo_app(
                 await server.stop(grace=0)
 
     app = Starlette(routes=routes, lifespan=lifespan)
-    app.add_middleware(ZooAuthMiddleware, mode=auth, idp=idp)
+    app.add_middleware(
+        ZooAuthMiddleware, mode=auth, idp=idp, challenge="no-challenge" not in breaks
+    )
     return app

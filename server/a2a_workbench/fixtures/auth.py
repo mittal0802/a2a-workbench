@@ -241,8 +241,9 @@ def _query(raw: bytes) -> dict[str, str]:
 class ZooAuthMiddleware:
     """Answers 401 to requests on the A2A endpoints that lack the mode's credentials."""
 
-    def __init__(self, app: ASGIApp, mode: str, idp: Any = None) -> None:
+    def __init__(self, app: ASGIApp, mode: str, idp: Any = None, challenge: bool = True) -> None:
         self.app = app
+        self.challenge = challenge
         self.check = oauth_check(idp) if mode in ("oauth", "oidc") else CHECKS.get(mode)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -261,10 +262,8 @@ class ZooAuthMiddleware:
             {
                 "type": "http.response.start",
                 "status": 401,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"www-authenticate", b'Bearer realm="zoo"'),
-                ],
+                "headers": [(b"content-type", b"application/json")]
+                + ([(b"www-authenticate", b'Bearer realm="zoo"')] if self.challenge else []),
             }
         )
         await send({"type": "http.response.body", "body": b'{"error": "unauthenticated"}'})

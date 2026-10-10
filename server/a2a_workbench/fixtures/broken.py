@@ -13,11 +13,13 @@ from typing import Any
 
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers.default_request_handler_v2 import DefaultRequestHandlerV2
+from a2a.server.tasks import BasePushNotificationSender
 from a2a.types import (
     AgentCard,
     AgentInterface,
     CancelTaskRequest,
     GetTaskRequest,
+    ListTaskPushNotificationConfigsRequest,
     ListTasksRequest,
     ListTasksResponse,
     Message,
@@ -28,7 +30,7 @@ from a2a.types import (
     TaskStatus,
     TaskStatusUpdateEvent,
 )
-from a2a.utils.errors import TaskNotFoundError
+from a2a.utils.errors import InvalidParamsError, TaskNotFoundError
 
 TERMINAL = {
     TaskState.TASK_STATE_COMPLETED,
@@ -65,6 +67,13 @@ BREAKS: dict[str, str] = {
     "subscribe-no-task-first": "SubscribeToTask without the Task first (A2A §3.1.6)",
     "subscribe-terminal-ok": "SubscribeToTask streams a finished task (A2A §3.1.6)",
     "streaming-undeclared-works": "streams although capabilities.streaming is false (A2A §3.3.4)",
+    "push-undeclared-works": "push configs accepted though not declared (A2A §3.3.4)",
+    "push-delete-not-idempotent": "deleting a deleted push config fails (A2A §3.1.10)",
+    "push-no-auth": "push notifications sent without Authorization (A2A §4.3.3)",
+    "auth-not-enforced": "declares Bearer auth but serves anyone (A2A §7.4)",
+    "no-challenge": "401 without WWW-Authenticate (A2A §3.3.2)",
+    "extension-not-enforced": "a required extension is not enforced (A2A §3.3.4)",
+    "wrong-error-codes": "InvalidParams instead of TaskNotFound / TaskNotCancelable (A2A §5.4)",
 }
 
 
@@ -134,7 +143,7 @@ class BrokenHandler(DefaultRequestHandlerV2):
         return await super().on_get_extended_agent_card(params, context)
 
     async def on_get_task(self, params: GetTaskRequest, context: ServerCallContext) -> Task:
-        """GetTask, inventing unknown tasks or ignoring historyLength as configured."""
+        """GetTask, inventing tasks, ignoring historyLength or erring wrongly as configured."""
         if "get-history-ignored" in self.breaks:
             params.ClearField("history_length")
         try:
@@ -142,6 +151,8 @@ class BrokenHandler(DefaultRequestHandlerV2):
         except TaskNotFoundError:
             if "get-unknown-returns" in self.breaks:
                 return _invented(params.id, TaskState.TASK_STATE_COMPLETED)
+            if "wrong-error-codes" in self.breaks:
+                raise InvalidParamsError(message="no such task") from None
             raise
 
     async def on_list_tasks(
@@ -170,7 +181,36 @@ class BrokenHandler(DefaultRequestHandlerV2):
             and "cancel-terminal-ok" in self.breaks
         ):
             return task
+        if (
+            task is not None
+            and task.status.state in TERMINAL
+            and "wrong-error-codes" in self.breaks
+        ):
+            raise InvalidParamsError(message="task is finished")
         return await super().on_cancel_task(params, context)
+
+    async def on_create_task_push_notification_config(
+        self, params: Any, context: ServerCallContext
+    ) -> Any:
+        """Create a push config, ignoring the push capability as configured."""
+        if "push-undeclared-works" in self.breaks:
+            unchecked = inspect.unwrap(
+                DefaultRequestHandlerV2.on_create_task_push_notification_config
+            )
+            return await unchecked(self, params, context)
+        return await super().on_create_task_push_notification_config(params, context)
+
+    async def on_delete_task_push_notification_config(
+        self, params: Any, context: ServerCallContext
+    ) -> Any:
+        """Delete a push config, failing when it is already gone as configured."""
+        if "push-delete-not-idempotent" in self.breaks:
+            listed = await self.on_list_task_push_notification_configs(
+                ListTaskPushNotificationConfigsRequest(task_id=params.task_id), context
+            )
+            if params.id not in {c.id for c in listed.configs}:
+                raise TaskNotFoundError(message="no such push notification config")
+        return await super().on_delete_task_push_notification_config(params, context)
 
     async def on_message_send_stream(
         self, params: SendMessageRequest, context: ServerCallContext
@@ -220,3 +260,13 @@ def _invented(task_id: str, state: Any) -> Task:
 def _terminal_event(event: Any) -> bool:
     status = getattr(event, "status", None)
     return status is not None and status.state in TERMINAL
+
+
+class BrokenPushSender(BasePushNotificationSender):
+    """The SDK push sender, sending without the config's Authorization (``push-no-auth``)."""
+
+    async def _dispatch_notification(self, event: Any, push_info: Any, task_id: str) -> bool:
+        stripped = type(push_info)()
+        stripped.CopyFrom(push_info)
+        stripped.ClearField("authentication")
+        return await super()._dispatch_notification(event, stripped, task_id)
