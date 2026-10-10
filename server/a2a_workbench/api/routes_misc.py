@@ -8,6 +8,7 @@ from a2a_workbench import __version__
 from a2a_workbench.api.deps import get_workbench
 from a2a_workbench.core.blobs import BlobNotFoundError, BlobOut
 from a2a_workbench.core.faults.profile import PRESETS, FaultProfile
+from a2a_workbench.core.health.passive import evaluate
 from a2a_workbench.core.workbench import Workbench
 
 router = APIRouter(prefix="/api")
@@ -57,4 +58,4 @@ async def get_exchange(exchange_id: str, wb: Workbench = Depends(get_workbench))
     record = await wb.exchanges.get(exchange_id)
     if record is None:
         raise HTTPException(404, detail="exchange not found")
-    return record
+    return {**record, "checks": [f.model_dump() for f in evaluate(record)]}

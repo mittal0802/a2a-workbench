@@ -10,6 +10,7 @@ import { SecurityView } from "../security/SecurityView";
 import { TasksView } from "../tasks/TasksView";
 import { IntegrateView } from "../integrate/IntegrateView";
 import { NotificationsView } from "../notifications/NotificationsView";
+import { HealthView } from "../health/HealthView";
 import { ConfirmButton } from "../../components/ConfirmButton";
 import { ConnectionMenu } from "./ConnectionMenu";
 
@@ -18,6 +19,7 @@ const TABS = [
   { id: "tasks", label: "Tasks" },
   { id: "notifications", label: "Notifications" },
   { id: "security", label: "Security" },
+  { id: "health", label: "Health" },
   { id: "integrate", label: "Integrate" },
   { id: "about", label: "About" },
 ] as const;
@@ -124,6 +126,11 @@ export function AgentPage() {
         {tab === "notifications" && (
           <section className="view on">
             <NotificationsView agent={a} />
+          </section>
+        )}
+        {tab === "health" && (
+          <section className="view on">
+            <HealthView agent={a} />
           </section>
         )}
         {tab === "integrate" && (

@@ -210,3 +210,19 @@ class WorkbenchSetting(Base):
     __tablename__ = "workbench_setting"
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(String(2000))
+
+
+class HealthRun(Base):
+    __tablename__ = "health_run"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    agent_id: Mapped[str] = mapped_column(String(32), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    card_url: Mapped[str] = mapped_column(String(2000), default="")
+    areas: Mapped[list[str]] = mapped_column(JSON, default=list)
+    interfaces: Mapped[list[str]] = mapped_column(JSON, default=list)
+    score: Mapped[int | None] = mapped_column(Integer, default=None)
+    counts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

@@ -378,9 +378,30 @@ def fixtures(
             "--llm", help="Serve the scripted test LLM (OpenAI-compatible) instead of an agent."
         ),
     ] = False,
+    breaks: Annotated[
+        str | None,
+        typer.Option(
+            "--breaks",
+            help="Spec violations to commit, comma-separated (see --list-breaks).",
+        ),
+    ] = None,
+    list_breaks: Annotated[
+        bool, typer.Option("--list-breaks", help="List the available violations and exit.")
+    ] = False,
 ) -> None:
     """Run the zoo reference agent (or, with --llm, the scripted test LLM) until interrupted."""
     import uvicorn
+
+    from a2a_workbench.fixtures.broken import BREAKS
+
+    if list_breaks:
+        for name, meaning in BREAKS.items():
+            typer.echo(f"{name}: {meaning}")
+        return
+    chosen = frozenset(b.strip() for b in (breaks or "").split(",") if b.strip())
+    if unknown := sorted(chosen - set(BREAKS)):
+        typer.echo(f"unknown breaks: {', '.join(unknown)} (see --list-breaks)", err=True)
+        raise typer.Exit(ExitCode.USAGE)
 
     if llm:
         from a2a_workbench.fixtures.llm import build_fake_openai_app
@@ -398,7 +419,8 @@ def fixtures(
     typer.echo(
         f"Zoo agent at {base_url}"
         + (f" (gRPC on {host}:{grpc})" if grpc else "")
-        + (" speaking A2A 0.3" if legacy else ""),
+        + (" speaking A2A 0.3" if legacy else "")
+        + (f" breaking: {', '.join(sorted(chosen))}" if chosen else ""),
         err=True,
     )
     if auth != "none":
@@ -418,7 +440,13 @@ def fixtures(
             err=True,
         )
     app_ = build_zoo_app(
-        base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy, auth=auth, idp=idp
+        base_url,
+        signed=not unsigned,
+        grpc_port=grpc,
+        legacy=legacy,
+        auth=auth,
+        idp=idp,
+        breaks=chosen,
     )
     uvicorn.run(app_, host=host, port=port)
 
@@ -1334,3 +1362,116 @@ def main() -> None:
     except Exception as exc:
         typer.echo(f"internal error: {type(exc).__name__}: {exc}", err=True)
         sys.exit(ExitCode.INTERNAL)
+
+
+_MARK = {"pass": "PASS", "warn": "WARN", "fail": "FAIL", "not_supported": "N/A ", "error": "ERR "}
+
+
+def _result_line(r: dict[str, Any]) -> str:
+    where = f" [{r['interface']}]" if r.get("interface") else ""
+    detail = r.get("actual") or ""
+    return f"{_MARK.get(r['status'], r['status'])}  {r['check_id']}{where}  {detail}".rstrip()
+
+
+def _text_report(report: dict[str, Any]) -> str:
+    lines = [_result_line(r) for r in report["results"]]
+    counts = report.get("counts") or {}
+    summary = ", ".join(f"{counts.get(k, 0)} {k}" for k in _MARK)
+    lines.append(f"Score {report.get('score')} ({summary})")
+    for r in report["results"]:
+        if r["status"] in ("fail", "warn"):
+            lines.append(f"  {r['check_id']}: expected {r['expected']}; {r['spec_ref']}")
+            lines.append(f"    fix: {r['fix_hint']}")
+    return "\n".join(lines)
+
+
+@app.command()
+def check(
+    target: Annotated[str, typer.Argument(help="Registered agent or agent URL.")],
+    area: Annotated[
+        str | None, typer.Option("--area", help="Comma-separated areas (A-L); default all.")
+    ] = None,
+    interface: Annotated[
+        str, typer.Option("--interface", help="selected (the agent's) or all interfaces.")
+    ] = "selected",
+    faults: FaultsOpt = None,
+    fail_on: Annotated[
+        str, typer.Option("--fail-on", help="Exit 1 on any 'fail', or on 'warn' and worse.")
+    ] = "fail",
+    fmt: Annotated[str, typer.Option("--format", help="text, json or html.")] = "text",
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Write the report here instead of stdout.")
+    ] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Run the conformance health checks against an agent and report the results.
+
+    Progress goes to stderr (NDJSON with --format json). Exit codes: 0 when no
+    result reaches --fail-on, 1 when one does or when nothing could be checked,
+    6 when some checks could not run, others as for every command.
+    """
+    from a2a_workbench.core.faults.profile import load_profile
+    from a2a_workbench.core.health.model import AREAS
+
+    fmt = "json" if as_json else fmt
+    if fmt not in ("text", "json", "html"):
+        _fail("workbench", "--format is text, json or html", as_json, ExitCode.USAGE)
+    if interface not in ("selected", "all"):
+        _fail("workbench", "--interface is selected or all", as_json, ExitCode.USAGE)
+    if fail_on not in ("fail", "warn"):
+        _fail("workbench", "--fail-on is fail or warn", as_json, ExitCode.USAGE)
+    areas = [a.strip().upper() for a in area.split(",") if a.strip()] if area else None
+    unknown = sorted(set(areas or []) - set(AREAS))
+    if unknown:
+        _fail("workbench", f"unknown areas: {', '.join(unknown)}", as_json, ExitCode.USAGE)
+    profile = None
+    if faults:
+        try:
+            profile = load_profile(faults)
+        except ValueError as exc:
+            _fail("workbench", str(exc), as_json, ExitCode.USAGE)
+
+    async def go() -> tuple[dict[str, Any], str | None]:
+        async with Workbench.open(Settings()) as wb:
+            agent = await _resolve_or_register(wb, target, fmt == "json")
+            run_id = None
+            async for event in wb.health.run(
+                agent.id,
+                areas=areas,
+                interfaces=interface,
+                faults=profile,  # type: ignore[arg-type]
+            ):
+                run_id = event.run_id
+                if fmt == "json":
+                    sys.stderr.write(json.dumps(event.model_dump(mode="json")) + "\n")
+                elif event.kind == "result":
+                    typer.echo(_result_line(event.data), err=True)
+            assert run_id is not None
+            report = await wb.health.report_json(run_id)
+            html = await wb.health.report_html(run_id) if fmt == "html" else None
+            return report, html
+
+    report, html = _run(go())
+    if fmt == "json":
+        text = json.dumps(report, indent=2)
+    elif fmt == "html":
+        text = html or ""
+    else:
+        text = _text_report(report)
+    if out is not None:
+        out.write_text(text)
+        typer.echo(f"Wrote {out} (score {report['score']})", err=True)
+    else:
+        typer.echo(text)
+    failing = {"fail"} if fail_on == "fail" else {"fail", "warn"}
+    statuses = [r["status"] for r in report["results"]]
+    if any(s in failing for s in statuses):
+        raise typer.Exit(ExitCode.CHECKS_FAILED)
+    if not any(s in ("pass", "warn", "fail") for s in statuses):
+        typer.echo(
+            "Nothing could be checked: every check was not supported or could not run.", err=True
+        )
+        raise typer.Exit(ExitCode.CHECKS_FAILED)
+    if "error" in statuses:
+        typer.echo("Some checks could not run; see the results marked ERR.", err=True)
+        raise typer.Exit(ExitCode.INTERNAL)

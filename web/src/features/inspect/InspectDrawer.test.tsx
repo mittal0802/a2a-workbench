@@ -127,3 +127,21 @@ describe("InspectDrawer injected faults", () => {
     expect(await screen.findByText("injected: drop_stream")).toBeInTheDocument();
   });
 });
+
+describe("InspectDrawer checks", () => {
+  it("shows the spec rules judged from the exchange", async () => {
+    vi.spyOn(api, "listExchanges").mockResolvedValue([summary] as never);
+    vi.spyOn(api, "getExchange").mockResolvedValue({
+      ...record,
+      checks: [
+        { check_id: "P1.stream_first_event", title: "A stream begins with the Task (or is one Message)", spec_ref: "A2A §3.1.2", level: "must", status: "fail", expected: "the Task first, or exactly one Message", actual: "first event is statusUpdate" },
+      ],
+    } as never);
+    renderDrawer("e1");
+    await userEvent.click(await screen.findByRole("button", { name: /Checks/ }));
+    const row = screen.getByTestId("check-P1.stream_first_event");
+    expect(row).toHaveTextContent("Fail");
+    expect(row).toHaveTextContent("got first event is statusUpdate");
+    expect(row).toHaveTextContent("A2A §3.1.2");
+  });
+});

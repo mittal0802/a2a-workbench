@@ -19,7 +19,9 @@ Tools (all return JSON; failures come back as `{"error": {...}}`):
 | `send_message(agent, text, …, conversation_id?, faults?)` | Send a message and wait; returns `conversation_id`, `events`, `final_state`, `error` |
 | `get_task`, `list_tasks`, `cancel_task`, `subscribe_task` | The A2A task methods |
 | `resubscribe(conversation_id)`, `check_status(conversation_id)` | Recover after a lost connection; the last event is `recovered` with a gap analysis |
-| `list_exchanges(conversation_id)`, `get_exchange(exchange_id)` | Exact wire traffic (secrets redacted) |
+| `list_exchanges(conversation_id)`, `get_exchange(exchange_id)` | Exact wire traffic (secrets redacted); `get_exchange` adds `checks`, the spec rules judged from that exchange alone |
+| `run_health_check(agent, areas?, interfaces?, faults?)` | Run the conformance checks and wait; returns `run_id`, `score`, `counts` and `findings` (fail, warn, error) with `expected`, `actual`, `spec_ref`, `fix_hint`, `exchange_ids` |
+| `list_findings(run_id?, agent?, status?)` | Results of a stored run (default: the agent's latest), filtered by status |
 | `list_agents`, `add_agent`, `fault_presets` | Registry and fault presets |
 | `auth_status(agent)` | Security schemes, requirement alternatives, which credentials are stored (masked) |
 | `set_credential(agent, scheme, api_key? / username+password? / token? / access_token? / cert_pem+key_pem?)` | Store a credential |
@@ -48,6 +50,23 @@ A2AW_CLIENT_SECRET="$SECRET" a2a-workbench auth login "My agent" oauth --client-
 a2a-workbench auth login "My agent" oauthDevice --client-id "$ID"   # prints a code to enter
 a2a-workbench auth probe "My agent" --json
 ```
+
+Health checks (conformance against the A2A spec):
+
+```bash
+a2a-workbench check http://localhost:9999                          # text report, exit 1 on a failed MUST
+a2a-workbench check "My agent" --area F,G --interface all --format json > report.json
+a2a-workbench check "My agent" --fail-on warn --format html --out report.html
+```
+
+Progress goes to stderr (NDJSON with `--format json`). Areas: A discovery, B
+transports and versions, C messaging, E results, F task operations, G
+streaming, H push notifications, I security, J extensions, K errors, L
+resilience. MUST rules fail, SHOULD rules warn; a feature the card does not
+declare is `not_supported` and not counted. `error` means the Workbench could
+not run the check (not counted either). Score = (pass + ½ warn) ÷ (pass + warn
++ fail). The checks create real tasks; destructive probes only touch tasks the
+run created.
 
 Agent-calling mode and integration code:
 
@@ -107,3 +126,7 @@ States are lowercase A2A task states: `submitted`, `working`, `input_required`,
    gaps, and `integration_guide` lists readiness advice.
 8. Try every binding the card lists (switch with the web UI connection menu,
    or `send --interface <url>`).
+9. Run `run_health_check` (or `a2a-workbench check --interface all`) and fix
+   the findings: each cites its spec section, says what was expected and what
+   came back, and links the exchanges to read with `get_exchange`. Re-run until
+   no `fail` remains.

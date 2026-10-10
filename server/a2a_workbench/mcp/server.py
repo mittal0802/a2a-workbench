@@ -22,6 +22,7 @@ from a2a_workbench.core.conversations.parts import (
 )
 from a2a_workbench.core.errors import AgentCallError
 from a2a_workbench.core.faults.profile import PRESETS, FaultProfile, load_profile
+from a2a_workbench.core.health.passive import evaluate
 from a2a_workbench.core.registry.service import AgentNotFoundError, AgentOut
 from a2a_workbench.core.tasks.service import ListTasksFilter
 from a2a_workbench.core.workbench import Workbench
@@ -34,10 +35,12 @@ see exact wire traffic. Use faults="flaky_stream" (see fault_presets) to drop
 a stream, then resubscribe(conversation_id) and read the "recovered" event's
 gap analysis. An "auth" error means the agent needs sign-in: auth_status(agent)
 lists its schemes, then set_credential or sign_in; auth_probe checks the agent
-really enforces what it declares. assist(goal, agents) runs an orchestrator
-LLM that calls agents the way the A2A spec defines a client agent; its steps
-show every call and rejected call. Errors come back as {"error": {...}} with a
-category.
+really enforces what it declares. run_health_check(agent) runs the A2A
+conformance checks (MUST rules fail, SHOULD rules warn) and returns findings
+with evidence exchange ids; list_findings reads stored runs. assist(goal,
+agents) runs an orchestrator LLM that calls agents the way the A2A spec
+defines a client agent; its steps show every call and rejected call. Errors
+come back as {"error": {...}} with a category.
 """
 
 
@@ -301,9 +304,15 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
 
     @server.tool()
     async def get_exchange(exchange_id: str) -> dict[str, Any]:
-        """Return one exchange with headers (secrets redacted), bodies, frames, timing, fault."""
+        """Return one exchange with headers (secrets redacted), bodies, frames, timing, fault.
+
+        ``checks`` lists the spec rules judged from this exchange alone (stream
+        first event, ListTasks artifacts, error code mapping) and their status.
+        """
         record = await wb.exchanges.get(exchange_id)
-        return record or {"error": {"category": "workbench", "message": "exchange not found"}}
+        if record is None:
+            return {"error": {"category": "workbench", "message": "exchange not found"}}
+        return {**record, "checks": [f.model_dump() for f in evaluate(record)]}
 
     async def card_of(agent: str) -> tuple[AgentOut, Any]:
         from a2a_workbench.core.a2a_json import card_from_json
@@ -640,6 +649,64 @@ def build_mcp_server(wb: Workbench) -> MCPServer:
         except Exception as exc:
             return _error(exc)
         return {"deliveries": [d.model_dump(mode="json") for d in items]}
+
+    @server.tool()
+    async def run_health_check(
+        agent: str,
+        areas: list[str] | None = None,
+        interfaces: str = "selected",
+        faults: str | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run the A2A conformance checks against an agent and wait for the result.
+
+        areas limits the run (A discovery, B transports, C messaging, E results,
+        F task operations, G streaming, H push, I security, J extensions, K
+        errors, L resilience); interfaces is "selected" or "all". Probes create
+        real tasks on the agent. Returns run_id, score, counts and the findings
+        (fail, warn, error) with expected, actual, spec_ref, fix_hint and the
+        exchange_ids to inspect with get_exchange.
+        """
+        if interfaces not in ("selected", "all"):
+            return {"error": {"category": "workbench", "message": "interfaces is selected or all"}}
+        try:
+            out = await resolve(agent)
+            run_id = None
+            async for event in wb.health.run(
+                out.id,
+                areas=[a.upper() for a in areas] if areas else None,
+                interfaces=interfaces,  # type: ignore[arg-type]
+                faults=_faults(faults),
+            ):
+                run_id = event.run_id
+            run = await wb.health.get(run_id)  # type: ignore[arg-type]
+        except Exception as exc:
+            return _error(exc)
+        return {
+            "run_id": run.id,
+            "score": run.score,
+            "counts": run.counts,
+            "findings": [
+                r.model_dump(mode="json")
+                for r in run.results
+                if r.status in ("fail", "warn", "error")
+            ],
+        }
+
+    @server.tool()
+    async def list_findings(
+        run_id: str | None = None, agent: str | None = None, status: str = "fail,warn,error"
+    ) -> dict[str, Any]:
+        """List results of a health run (default: the agent's latest, or the latest overall).
+
+        status is a comma-separated filter of pass, warn, fail, not_supported, error.
+        """
+        statuses = tuple(s.strip() for s in status.split(",") if s.strip())
+        try:
+            agent_id = (await resolve(agent)).id if agent and not run_id else None
+            found = await wb.health.findings(run_id=run_id, agent_id=agent_id, statuses=statuses)
+        except Exception as exc:
+            return _error(exc)
+        return {"findings": [r.model_dump(mode="json") for r in found]}
 
     @server.tool()
     async def fault_presets() -> dict[str, Any]:

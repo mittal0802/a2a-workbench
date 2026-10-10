@@ -89,7 +89,7 @@ class RecordingGrpcInterceptor:
             complete=False,
         )
         if scope:
-            scope.exchange_ids.append(exchange.id)
+            scope.add(exchange.id)
         return exchange
 
     async def _finish(

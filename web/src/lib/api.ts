@@ -15,6 +15,8 @@ import type {
   CardPreview,
   Conversation,
   ExchangeRecord,
+  HealthCatalogue,
+  HealthRun,
   ExchangeSummary,
   PartInput,
   A2ATask,
@@ -137,6 +139,15 @@ export const api = {
   listExchanges: (conversationId: string) =>
     call<ExchangeSummary[]>(`/api/exchanges?conversation_id=${encodeURIComponent(conversationId)}`),
   getExchange: (id: string) => call<ExchangeRecord>(`/api/exchanges/${id}`),
+  healthChecks: () => call<HealthCatalogue>("/api/health/checks"),
+  startHealthRun: (agentId: string, body: { areas?: string[]; interfaces?: "selected" | "all" }) =>
+    call<{ run_id: string; topic: string }>(`/api/agents/${agentId}/health/runs`, { method: "POST", body: json(body) }),
+  listHealthRuns: (agentId?: string) =>
+    call<HealthRun[]>(`/api/health/runs${agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""}`),
+  getHealthRun: (runId: string) => call<HealthRun>(`/api/health/runs/${runId}`),
+  stopHealthRun: (runId: string) => call<void>(`/api/health/runs/${runId}/active`, { method: "DELETE" }),
+  healthReportUrl: (runId: string, format: "json" | "html") =>
+    `/api/health/runs/${runId}/report.${format}${format === "html" ? "?download=true" : ""}`,
   security: (agentId: string) => call<SecurityOverview>(`/api/agents/${agentId}/security`),
   putCredential: (agentId: string, scheme: string, body: CredentialInput) =>
     call<CredentialInfo>(`/api/agents/${agentId}/credentials/${encodeURIComponent(scheme)}`, {

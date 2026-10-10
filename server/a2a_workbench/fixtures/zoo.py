@@ -15,7 +15,7 @@ from a2a.compat.v0_3 import a2a_v0_3_pb2_grpc
 from a2a.compat.v0_3.grpc_handler import CompatGrpcHandler
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.server.request_handlers import DefaultRequestHandlerV2, GrpcHandler
+from a2a.server.request_handlers import GrpcHandler
 from a2a.server.routes import (
     create_agent_card_routes,
     create_jsonrpc_routes,
@@ -55,6 +55,13 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from a2a_workbench.fixtures.auth import ZooAuthMiddleware, ZooGrpcAuthInterceptor, security_for
+from a2a_workbench.fixtures.broken import (
+    BREAKS,
+    BrokenHandler,
+    BrokenPushSender,
+    apply_card_breaks,
+    tamper_signed_card,
+)
 
 KEY_ID = "zoo-1"
 ZOO_EXTENSION = "https://github.com/mittal0802/a2a-workbench/extensions/zoo-inspect/v1"
@@ -82,6 +89,15 @@ def _token_scopes(context: RequestContext) -> list[str]:
     return str(claims.get("scope", "")).split()
 
 
+def _split_store_handler(handler: Any, card: AgentCard, breaks: frozenset[str]) -> Any:
+    return BrokenHandler(
+        breaks=breaks,
+        agent_executor=handler.agent_executor,
+        task_store=InMemoryTaskStore(),
+        agent_card=card,
+    )
+
+
 class ZooExecutor(AgentExecutor):
     """Agent whose behaviour is chosen by the first word of the user's text.
 
@@ -94,11 +110,30 @@ class ZooExecutor(AgentExecutor):
     artifact chunks 150 ms apart; ``stall <seconds>`` goes silent after
     starting work; ``auth`` enters
     ``auth_required``; ``inspect`` returns a data artifact describing the
-    received message, configuration and requested extensions.
+    received message, configuration and requested extensions. ``breaks`` (from
+    ``fixtures.broken``) changes behaviour on purpose.
     """
 
+    def __init__(
+        self, breaks: frozenset[str] = frozenset(), *, required_extension: bool = False
+    ) -> None:
+        self.breaks = breaks
+        self.required_extension = required_extension
+
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Run the behaviour selected by the user text and publish its events."""
+        """Run the behaviour selected by the user text and publish its events.
+
+        With ``required_extension``, a request that does not activate the zoo
+        extension is refused with ExtensionSupportRequiredError (A2A §3.3.4).
+        """
+        if (
+            self.required_extension
+            and "extension-not-enforced" not in self.breaks
+            and ZOO_EXTENSION not in context.requested_extensions
+        ):
+            from a2a.utils.errors import ExtensionSupportRequiredError
+
+            raise ExtensionSupportRequiredError(message=f"activate {ZOO_EXTENSION}")
         text = context.get_user_input().strip()
         word, _, rest = text.partition(" ")
         word = word.lower()
@@ -225,6 +260,9 @@ class ZooExecutor(AgentExecutor):
             )
             await updater.complete()
         else:
+            if "message-output" in self.breaks:
+                await updater.complete(updater.new_agent_message([Part(text=text or "(empty)")]))
+                return
             await updater.add_artifact([Part(text=text or "(empty)")], name="echo")
             await updater.complete()
 
@@ -290,7 +328,7 @@ def build_zoo_card(
                 name="Ask",
                 description="Asks a question before finishing.",
                 tags=["test"],
-                examples=["ask"],
+                examples=["ask", "long"],
             ),
         ],
     )
@@ -314,6 +352,9 @@ def build_zoo_app(
     idp: Any = None,
     extended_configured: bool = True,
     push: bool = True,
+    breaks: frozenset[str] = frozenset(),
+    streaming: bool = True,
+    required_extension: bool = False,
 ) -> Starlette:
     """Return an ASGI app serving the zoo agent, its card (at ``card_path``) and its JWKS.
 
@@ -325,11 +366,26 @@ def build_zoo_app(
 
     With ``extended_configured=False`` the card still declares an extended card but
     none is configured, so GetExtendedAgentCard answers ExtendedAgentCardNotConfiguredError.
+    ``breaks`` names deliberate violations from ``fixtures.broken.BREAKS``.
     """
+    unknown = set(breaks) - set(BREAKS)
+    if unknown:
+        raise ValueError(f"unknown breaks: {', '.join(sorted(unknown))}")
     host = base_url.split("://", 1)[1].split(":", 1)[0]
     grpc_target = f"{host}:{grpc_port}" if grpc_port else None
     card = build_zoo_card(base_url, grpc_target, "0.3" if legacy else "1.0")
     card.capabilities.push_notifications = push
+    card.capabilities.streaming = streaming
+    if required_extension:
+        card.capabilities.extensions[0].required = True
+    if "auth-not-enforced" in breaks and auth == "none":
+        from a2a.types import HTTPAuthSecurityScheme, SecurityScheme
+
+        card.security_schemes["bearer"].CopyFrom(
+            SecurityScheme(http_auth_security_scheme=HTTPAuthSecurityScheme(scheme="Bearer"))
+        )
+        card.security_requirements.append(SecurityRequirement(schemes={"bearer": StringList()}))
+    apply_card_breaks(card, breaks, base_url)
     schemes, requirements = security_for(auth, idp.issuer if idp else None)
     for name, scheme in schemes.items():
         card.security_schemes[name].CopyFrom(scheme)
@@ -367,6 +423,7 @@ def build_zoo_app(
             },
         )
         card = signer(card)
+        tamper_signed_card(card, breaks)
 
     extended = AgentCard()
     extended.CopyFrom(card)
@@ -380,9 +437,13 @@ def build_zoo_app(
             examples=["echo visa"],
         )
     )
-    push_store = InMemoryPushNotificationConfigStore() if push else None
-    handler = DefaultRequestHandlerV2(
-        agent_executor=ZooExecutor(),
+    push_store = (
+        InMemoryPushNotificationConfigStore() if push or "push-undeclared-works" in breaks else None
+    )
+    sender_class = BrokenPushSender if "push-no-auth" in breaks else BasePushNotificationSender
+    handler = BrokenHandler(
+        breaks=breaks,
+        agent_executor=ZooExecutor(breaks, required_extension=required_extension),
         task_store=InMemoryTaskStore(),
         agent_card=card,
         extended_agent_card=(
@@ -390,7 +451,7 @@ def build_zoo_app(
         ),
         push_config_store=push_store,
         push_sender=(
-            BasePushNotificationSender(httpx.AsyncClient(timeout=10), push_store) if push else None
+            sender_class(httpx.AsyncClient(timeout=10), push_store) if push_store else None
         ),
     )
 
@@ -398,10 +459,18 @@ def build_zoo_app(
         return JSONResponse({"keys": [jwk]})
 
     routes = [
-        *create_agent_card_routes(card, card_url=card_path),
+        *create_agent_card_routes(
+            card,
+            card_url=card_path,
+            cache_control=None if "card-no-cache" in breaks else "public, max-age=300",
+        ),
         Route("/.well-known/jwks.json", jwks),
         *create_jsonrpc_routes(handler, "/a2a", enable_v0_3_compat=legacy),
-        *create_rest_routes(handler, path_prefix="/v1", enable_v0_3_compat=legacy),
+        *create_rest_routes(
+            _split_store_handler(handler, card, breaks) if "split-stores" in breaks else handler,
+            path_prefix="/v1",
+            enable_v0_3_compat=legacy,
+        ),
     ]
 
     @asynccontextmanager
@@ -424,5 +493,7 @@ def build_zoo_app(
                 await server.stop(grace=0)
 
     app = Starlette(routes=routes, lifespan=lifespan)
-    app.add_middleware(ZooAuthMiddleware, mode=auth, idp=idp)
+    app.add_middleware(
+        ZooAuthMiddleware, mode=auth, idp=idp, challenge="no-challenge" not in breaks
+    )
     return app
