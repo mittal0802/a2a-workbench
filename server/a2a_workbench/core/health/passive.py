@@ -72,6 +72,21 @@ def _finding(
     )
 
 
+_V03_KINDS = {
+    "task": "task",
+    "message": "message",
+    "status-update": "statusUpdate",
+    "artifact-update": "artifactUpdate",
+}
+
+
+def _payload_kind(frame: dict[str, Any]) -> str:
+    """The kind of a stream event: the v1.0 StreamResponse field, or the v0.3 ``kind``."""
+    if "kind" in frame:
+        return _V03_KINDS.get(str(frame["kind"]), str(frame["kind"]))
+    return next(iter(frame), "")
+
+
 def _stream_first(record: dict[str, Any], rpc: dict[str, Any] | None) -> PassiveFinding | None:
     op = record.get("operation")
     if op not in ("send_message", "subscribe_task") or not record.get("frames"):
@@ -79,7 +94,7 @@ def _stream_first(record: dict[str, Any], rpc: dict[str, Any] | None) -> Passive
     frames = _frames(record, rpc is not None)
     if not frames or "error" in frames[0]:
         return None
-    first = next(iter(frames[0]), "")
+    first = _payload_kind(frames[0])
     if op == "subscribe_task":
         return _finding(
             "P1.subscribe_task_first",

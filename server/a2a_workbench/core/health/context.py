@@ -1,5 +1,6 @@
 """What a check can use while it probes an agent."""
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from a2a.types import AgentCard
@@ -48,6 +49,27 @@ class RunContext:
         """The card's capabilities."""
         return self.card.capabilities
 
+    async def cached(self, key: str, make: Callable[[], Awaitable[Any]]) -> Any:
+        """Return ``make()``'s result, computed once per run and interface.
+
+        The exchanges recorded while computing it are attributed to every
+        check that reuses it, so each keeps its evidence.
+        """
+        from a2a_workbench.core.connection.recorder import (
+            add_to_current_scope,
+            current_exchange_ids,
+        )
+
+        if key in self.cache:
+            value, ids = self.cache[key]
+            add_to_current_scope(ids)
+            return value
+        before = set(current_exchange_ids())
+        value = await make()
+        ids = [i for i in current_exchange_ids() if i not in before]
+        self.cache[key] = (value, ids)
+        return value
+
     async def new_conversation(self) -> str:
         """Start a fresh probe conversation (origin ``health``)."""
         conv = await self.wb.conversations.create(
@@ -66,16 +88,15 @@ class RunContext:
 
     async def open_task(self) -> "Reply | None":
         """A task left waiting for input, found by trying up to three probe texts."""
-        if "open_task" in self.cache:
-            return self.cache["open_task"]
-        found = None
-        for text in self.probe_texts()[:3]:
-            r = await self.reply(text)
-            if r.kind == "task" and r.state in INTERRUPTED_STATES:
-                found = r
-                break
-        self.cache["open_task"] = found
-        return found
+
+        async def find() -> "Reply | None":
+            for text in self.probe_texts()[:3]:
+                r = await self.reply(text)
+                if r.kind == "task" and r.state in INTERRUPTED_STATES:
+                    return r
+            return None
+
+        return await self.cached("open_task", find)
 
     async def send(
         self,
@@ -88,9 +109,12 @@ class RunContext:
         """Send a message through ``ConversationService`` and return its events.
 
         Defaults to a blocking, non-streaming send with exactly the given ids.
+        The run's fault profile applies unless ``options`` sets its own.
         Tasks the agent creates are added to ``created_tasks``.
         """
         opts = options or SendOptions(stream=False, inherit_ids=False)
+        if self.faults is not None and opts.faults is None:
+            opts = opts.model_copy(update={"faults": self.faults})
         conv = conversation_id or await self.new_conversation()
         events = [
             e

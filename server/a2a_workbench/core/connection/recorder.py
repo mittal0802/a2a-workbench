@@ -204,6 +204,14 @@ def scrub_exchange(exchange: "Exchange") -> None:
         frame.data = clean(frame.data) or ""
 
 
+def add_to_current_scope(exchange_ids: list[str]) -> None:
+    """Attribute already recorded exchanges to the active scope (and its parents) too."""
+    scope = _current_scope.get()
+    if scope is not None:
+        for exchange_id in exchange_ids:
+            scope.add(exchange_id)
+
+
 def current_exchange_ids() -> list[str]:
     """Ids of the exchanges recorded so far in the active scope (empty outside one)."""
     scope = _current_scope.get()

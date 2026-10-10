@@ -1,21 +1,40 @@
 """Area A — Discovery: the Agent Card (A2A §8)."""
 
+from typing import Any
+
 from a2a.types import GetExtendedAgentCardRequest
 
 from a2a_workbench.core.a2a_json import to_json
 from a2a_workbench.core.connection.cards import CardFetchError
 from a2a_workbench.core.health.checks.common import call, describe, reason_of
 from a2a_workbench.core.health.context import RunContext
-from a2a_workbench.core.health.model import Check, Outcome, passed, skipped, violated
+from a2a_workbench.core.health.model import (
+    Check,
+    NotApplicable,
+    Outcome,
+    passed,
+    skipped,
+    violated,
+)
 from a2a_workbench.core.health.registry import register
 
 
+async def _preview(ctx: RunContext) -> Any:
+    """The card fetched once per run: a CardPreview, or the CardFetchError."""
+
+    async def fetch() -> Any:
+        try:
+            return await ctx.wb.agents.preview(ctx.agent.base_url, ctx.agent.card_path)
+        except CardFetchError as exc:
+            return exc
+
+    return await ctx.cached("preview", fetch)
+
+
 async def _card_reachable(ctx: RunContext) -> Outcome:
-    try:
-        preview = await ctx.wb.agents.preview(ctx.agent.base_url, ctx.agent.card_path)
-    except CardFetchError as exc:
-        return violated("the Agent Card at the well-known path", f"could not load it: {exc}")
-    ctx.cache["preview"] = preview
+    preview = await _preview(ctx)
+    if isinstance(preview, CardFetchError):
+        return violated("the Agent Card at the well-known path", f"could not load it: {preview}")
     return passed("the Agent Card", f"served ({len(preview.card)} fields)")
 
 
@@ -24,6 +43,7 @@ def _missing(fields: dict, names: list[str]) -> list[str]:
 
 
 async def _required_fields(ctx: RunContext) -> Outcome:
+    await _preview(ctx)
     card = to_json(ctx.card)
     missing = _missing(
         card,
@@ -46,6 +66,7 @@ async def _required_fields(ctx: RunContext) -> Outcome:
 
 
 async def _interfaces(ctx: RunContext) -> Outcome:
+    await _preview(ctx)
     bad = []
     for i, iface in enumerate(ctx.card.supported_interfaces):
         missing = [
@@ -64,6 +85,7 @@ async def _interfaces(ctx: RunContext) -> Outcome:
 
 
 async def _skills(ctx: RunContext) -> Outcome:
+    await _preview(ctx)
     bad = []
     for i, skill in enumerate(ctx.card.skills):
         missing = [f for f in ("id", "name", "description", "tags") if not getattr(skill, f)]
@@ -75,9 +97,9 @@ async def _skills(ctx: RunContext) -> Outcome:
 
 
 async def _signature(ctx: RunContext) -> Outcome:
-    preview = ctx.cache.get("preview") or await ctx.wb.agents.preview(
-        ctx.agent.base_url, ctx.agent.card_path
-    )
+    preview = await _preview(ctx)
+    if isinstance(preview, CardFetchError):
+        raise NotApplicable("the card could not be loaded (see A1)")
     if preview.signature_status == "verified":
         return passed("signatures that verify", "verified")
     detail = f"{preview.signature_status}" + (
@@ -87,9 +109,9 @@ async def _signature(ctx: RunContext) -> Outcome:
 
 
 async def _caching(ctx: RunContext) -> Outcome:
-    preview = ctx.cache.get("preview") or await ctx.wb.agents.preview(
-        ctx.agent.base_url, ctx.agent.card_path
-    )
+    preview = await _preview(ctx)
+    if isinstance(preview, CardFetchError):
+        raise NotApplicable("the card could not be loaded (see A1)")
     path = ctx.agent.card_path or "/.well-known/agent-card.json"
     record = None
     for eid in preview.exchange_ids:

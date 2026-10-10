@@ -65,6 +65,8 @@ async def _mismatch(ctx: RunContext) -> Outcome:
     target = await ctx.open_task() or await ctx.reply()
     if (s := _auth_skip(target)) is not None:
         return s
+    if target.kind == "error":
+        return skipped(f"the probe message failed: {describe(target.error)}")
     if target.kind != "task" or not target.task_id:
         return skipped("the agent answered with a Message, so there is no task to address")
     other = f"a2aw-health-{uuid.uuid4().hex}"

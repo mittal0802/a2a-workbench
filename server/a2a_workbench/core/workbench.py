@@ -94,17 +94,19 @@ class Workbench:
         await self.kv.set("tunnel_url", url)
 
     async def start(self) -> None:
-        """Create the state directory, the schema and the default workspace."""
+        """Create the state directory, the schema and the default workspace; close stale runs."""
         self.settings.home.mkdir(parents=True, exist_ok=True)
         await self.db.create_schema()
         async with self.db.sessions() as session:
             if await session.get(Workspace, DEFAULT_WORKSPACE_ID) is None:
                 session.add(Workspace(id=DEFAULT_WORKSPACE_ID, name="Default"))
                 await session.commit()
+        await self.health.recover()
 
     async def close(self) -> None:
-        """Stop Assistant turns and release database connections."""
+        """Stop Assistant turns and health runs, and release database connections."""
         await self.assistant.close()
+        await self.health.close()
         if self.tunnel.running:
             await self.set_tunnel_url(None)
         await self.tunnel.stop()

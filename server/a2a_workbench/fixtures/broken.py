@@ -30,7 +30,7 @@ from a2a.types import (
     TaskStatus,
     TaskStatusUpdateEvent,
 )
-from a2a.utils.errors import InvalidParamsError, TaskNotFoundError
+from a2a.utils.errors import InvalidParamsError, TaskNotFoundError, UnsupportedOperationError
 
 TERMINAL = {
     TaskState.TASK_STATE_COMPLETED,
@@ -74,6 +74,9 @@ BREAKS: dict[str, str] = {
     "no-challenge": "401 without WWW-Authenticate (A2A §3.3.2)",
     "extension-not-enforced": "a required extension is not enforced (A2A §3.3.4)",
     "wrong-error-codes": "InvalidParams instead of TaskNotFound / TaskNotCancelable (A2A §5.4)",
+    "get-returns-other-task": "GetTask answers with a different task (A2A §3.1.3)",
+    "push-config-dropped": "created push configs are not listed (A2A §3.1.9)",
+    "extended-unsupported": "declares the extended card but refuses it (A2A §3.3.4)",
     "cancel-on-disconnect": "cancels a task when its stream drops (A2A §3.5.2)",
     "single-subscriber": "a second stream for a task closes after the Task (A2A §3.5.2)",
 }
@@ -141,9 +144,11 @@ class BrokenHandler(DefaultRequestHandlerV2):
     async def on_get_extended_agent_card(
         self, params: Any, context: ServerCallContext
     ) -> AgentCard:
-        """Serve the extended card even when the capability is not declared, if configured to."""
+        """Serve the extended card when undeclared, or refuse it when declared, as configured."""
         if "extended-ignores-capability" in self.breaks:
             return self.extended_agent_card or self._agent_card
+        if "extended-unsupported" in self.breaks:
+            raise UnsupportedOperationError(message="no extended card")
         return await super().on_get_extended_agent_card(params, context)
 
     async def on_get_task(self, params: GetTaskRequest, context: ServerCallContext) -> Task:
@@ -151,7 +156,10 @@ class BrokenHandler(DefaultRequestHandlerV2):
         if "get-history-ignored" in self.breaks:
             params.ClearField("history_length")
         try:
-            return await super().on_get_task(params, context)
+            task = await super().on_get_task(params, context)
+            if "get-returns-other-task" in self.breaks:
+                return _invented(f"other-{params.id}", task.status.state)
+            return task
         except TaskNotFoundError:
             if "get-unknown-returns" in self.breaks:
                 return _invented(params.id, TaskState.TASK_STATE_COMPLETED)
@@ -203,6 +211,15 @@ class BrokenHandler(DefaultRequestHandlerV2):
             )
             return await unchecked(self, params, context)
         return await super().on_create_task_push_notification_config(params, context)
+
+    async def on_list_task_push_notification_configs(
+        self, params: Any, context: ServerCallContext
+    ) -> Any:
+        """List push configs, leaving all of them out as configured."""
+        listed = await super().on_list_task_push_notification_configs(params, context)
+        if "push-config-dropped" in self.breaks:
+            del listed.configs[:]
+        return listed
 
     async def on_delete_task_push_notification_config(
         self, params: Any, context: ServerCallContext

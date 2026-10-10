@@ -1,6 +1,7 @@
 """Runs checks against an agent, scores them and keeps the runs."""
 
 import asyncio
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -11,15 +12,19 @@ from sqlalchemy import select
 
 from a2a_workbench.core.a2a_json import card_from_json
 from a2a_workbench.core.connection.client import (
-    SUPPORTED_BINDINGS,
     interface_override,
     select_interface,
+    supported,
 )
-from a2a_workbench.core.connection.recorder import recording_scope
+from a2a_workbench.core.connection.recorder import REDACTED, recording_scope, redact_url
+from a2a_workbench.core.errors import AgentCallError
+from a2a_workbench.core.health.checks.common import guard
 from a2a_workbench.core.health.context import PROBE_TIMEOUT_S, RunContext
 from a2a_workbench.core.health.model import (
     Check,
+    NotApplicable,
     Result,
+    WorkbenchFailure,
     score,
     status_for,
     summarize,
@@ -28,6 +33,30 @@ from a2a_workbench.core.health.registry import builtin_checks
 from a2a_workbench.core.store.models import HealthRun
 
 REPORT_SCHEMA = 1
+_URL = re.compile(r"(?:https?|grpc)://[^\s'\"<>]+")
+
+
+def _mask(text: str, secrets: set[str]) -> str:
+    """``text`` with credential values and credential-like URL parts masked."""
+    if not text:
+        return text
+    text = _URL.sub(lambda m: redact_url(m.group(0)), text)
+    for secret in sorted(secrets, key=len, reverse=True):
+        text = text.replace(secret, REDACTED)
+    return text
+
+
+def _version_of(ctx: RunContext) -> str:
+    """The protocol version of the interface ``ctx`` tests (``1.0`` when unstated)."""
+    for iface in ctx.card.supported_interfaces:
+        if iface.url == ctx.interface_url:
+            return iface.protocol_version or "1.0"
+    return "1.0"
+
+
+def _card_only(check: Check) -> bool:
+    """Whether the check judges only the card document, whatever the interface's version."""
+    return check.area == "A" and not check.id.startswith("A7")
 
 
 class ProgressEvent(BaseModel):
@@ -116,6 +145,23 @@ class HealthService:
         self._running[first.run_id] = (asyncio.create_task(drain()), events)
         return first.run_id
 
+    async def close(self) -> None:
+        """Stop every background run (each is stored as ``stopped``)."""
+        for run_id in list(self._running):
+            await self.stop(run_id)
+
+    async def recover(self) -> None:
+        """Mark runs left ``running`` by an earlier process as ``stopped``."""
+        async with self._wb.db.sessions() as session:
+            rows = (
+                await session.execute(select(HealthRun).where(HealthRun.status == "running"))
+            ).scalars()
+            for row in rows:
+                if row.id not in self._running:
+                    row.status = "stopped"
+                    row.finished_at = row.finished_at or datetime.now(UTC)
+            await session.commit()
+
     def is_running(self, run_id: str) -> bool:
         """Whether a run started with ``start`` is still in progress in this process."""
         return run_id in self._running
@@ -162,11 +208,7 @@ class HealthService:
 
     def _interfaces(self, card: Any, agent: Any, which: str) -> list[tuple[str, str]]:
         if which == "all":
-            return [
-                (i.url, i.protocol_binding)
-                for i in card.supported_interfaces
-                if i.protocol_binding in SUPPORTED_BINDINGS
-            ]
+            return [(i.url, i.protocol_binding) for i in card.supported_interfaces if supported(i)]
         iface = select_interface(card, agent.selected_interface_url)
         return [(iface.url, iface.protocol_binding)]
 
@@ -192,7 +234,15 @@ class HealthService:
             AgentNotFoundError: if the agent is not registered.
         """
         agent = await self._wb.agents.get(agent_id)
+        try:
+            agent = await self._wb.agents.refresh_card(agent_id)
+        except Exception:
+            pass
         card = card_from_json(agent.card)
+        try:
+            secrets = (await self._wb.auth.plan(agent_id, card)).secrets()
+        except Exception:
+            secrets = set()
         targets = self._interfaces(card, agent, interfaces)
         checks = [c for c in self.checks if not areas or c.area in areas]
         conv = await self._wb.conversations.create(agent_id, title="Health check", origin="health")
@@ -240,7 +290,7 @@ class HealthService:
             )
             for check in checks:
                 for url, _binding in targets if check.per_interface else targets[:1]:
-                    result = await self._run_one(check, contexts[url], agent_id, conv.id)
+                    result = await self._run_one(check, contexts[url], agent_id, conv.id, secrets)
                     if not check.per_interface:
                         result.interface = None
                     results.append(result)
@@ -268,7 +318,15 @@ class HealthService:
             )
         )
 
-    async def _run_one(self, check: Check, ctx: RunContext, agent_id: str, conv_id: str) -> Result:
+    async def _run_one(
+        self, check: Check, ctx: RunContext, agent_id: str, conv_id: str, secrets: set[str]
+    ) -> Result:
+        result = await self._judge(check, ctx, agent_id, conv_id)
+        result.expected = _mask(result.expected, secrets)
+        result.actual = _mask(result.actual, secrets)
+        return result
+
+    async def _judge(self, check: Check, ctx: RunContext, agent_id: str, conv_id: str) -> Result:
         started = time.monotonic()
         token = interface_override.set(ctx.interface_url)
         base = {
@@ -285,6 +343,13 @@ class HealthService:
                 f"health:{check.id}", agent_id=agent_id, conversation_id=conv_id
             ) as scope:
                 try:
+                    version = _version_of(ctx)
+                    if version.startswith("0.") and not _card_only(check):
+                        return Result(
+                            **base,
+                            status="not_supported",
+                            actual=f"the checks cite A2A 1.0; this interface speaks A2A {version}",
+                        )
                     reason = check.applies(ctx)
                     if reason:
                         return Result(**base, status="not_supported", actual=reason)
@@ -295,6 +360,22 @@ class HealthService:
                         status=status,
                         expected=outcome.expected,
                         actual=outcome.actual,
+                        exchange_ids=list(scope.exchange_ids),
+                        duration_ms=round((time.monotonic() - started) * 1000, 1),
+                    )
+                except AgentCallError as exc:
+                    try:
+                        guard(exc.classified)
+                        actual = f"AgentCallError: {exc}"[:500]
+                    except NotApplicable as na:
+                        return Result(**base, status="not_supported", actual=str(na))
+                    except WorkbenchFailure as wf:
+                        actual = f"WorkbenchFailure: {wf}"[:500]
+                except NotApplicable as exc:
+                    return Result(
+                        **base,
+                        status="not_supported",
+                        actual=str(exc),
                         exchange_ids=list(scope.exchange_ids),
                         duration_ms=round((time.monotonic() - started) * 1000, 1),
                     )

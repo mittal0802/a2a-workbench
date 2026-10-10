@@ -1,7 +1,6 @@
 """Area H — Push notifications: config operations and deliveries (A2A §3.1.7–§3.1.10, §4.3)."""
 
 import asyncio
-import uuid
 from typing import Any
 
 from a2a_workbench.core.conversations.options import SendOptions
@@ -28,6 +27,8 @@ async def _task_id(ctx: RunContext) -> str | Outcome:
     reply = await ctx.reply()
     if reply.kind == "error" and (reply.error or {}).get("category") == "auth":
         return skipped("the agent requires sign-in; add credentials to check this")
+    if reply.kind == "error":
+        return skipped(f"the probe message failed: {describe(reply.error)}")
     if reply.kind != "task" or not reply.task_id:
         return skipped("the agent answered with a Message, so there is no task")
     return reply.task_id
@@ -49,19 +50,17 @@ async def _crud(ctx: RunContext) -> Outcome:
     if isinstance(task_id, Outcome):
         return task_id
     expected = "create, get, list and delete the config"
-    config_id = f"a2aw-health-{uuid.uuid4().hex[:12]}"
-    created, error = await call(
-        ctx.wb.push.create(ctx.agent.id, task_id, url=PROBE_URL, config_id=config_id)
-    )
+    created, error = await call(ctx.wb.push.create_workbench(ctx.agent.id, task_id))
     if error is not None:
         return violated(expected, f"create: {describe(error)}")
-    config_id = created.get("id") or config_id
-    if created.get("url") != PROBE_URL:
-        return violated(expected, f"create returned url {created.get('url')!r}")
+    url = created["hook"]["url"]
+    config_id = created["config"].get("id") or created["hook"]["id"]
+    if created["config"].get("url") != url:
+        return violated(expected, f"create returned url {created['config'].get('url')!r}")
     got, error = await call(ctx.wb.push.get(ctx.agent.id, task_id, config_id))
     if error is not None:
         return violated(expected, f"get: {describe(error)}")
-    if got.get("id") != config_id or got.get("url") != PROBE_URL:
+    if got.get("id") != config_id or got.get("url") != url:
         return violated(expected, f"get returned {got.get('id')} {got.get('url')!r}")
     listed, error = await call(ctx.wb.push.list(ctx.agent.id, task_id))
     if error is not None:
@@ -82,13 +81,10 @@ async def _delete_idempotent(ctx: RunContext) -> Outcome:
     if isinstance(task_id, Outcome):
         return task_id
     expected = "a second delete succeeds like the first"
-    config_id = f"a2aw-health-{uuid.uuid4().hex[:12]}"
-    created, error = await call(
-        ctx.wb.push.create(ctx.agent.id, task_id, url=PROBE_URL, config_id=config_id)
-    )
+    created, error = await call(ctx.wb.push.create_workbench(ctx.agent.id, task_id))
     if error is not None:
         return skipped(f"could not create a config: {describe(error)}")
-    config_id = created.get("id") or config_id
+    config_id = created["config"].get("id") or created["hook"]["id"]
     _, error = await call(ctx.wb.push.delete(ctx.agent.id, task_id, config_id))
     if error is not None:
         return violated(expected, f"first delete: {describe(error)}")

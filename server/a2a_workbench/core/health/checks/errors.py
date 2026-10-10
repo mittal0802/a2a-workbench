@@ -21,8 +21,12 @@ async def _provoke(
     ctx: RunContext,
 ) -> list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]]:
     """Provoke A2A errors; return (error name, classified error, recorded exchange) per probe."""
-    if "error_probes" in ctx.cache:
-        return ctx.cache["error_probes"]
+    return await ctx.cached("error_probes", lambda: _provoke_once(ctx))
+
+
+async def _provoke_once(
+    ctx: RunContext,
+) -> list[tuple[str, dict[str, Any] | None, dict[str, Any] | None]]:
     probes: list[tuple[str, Any]] = [
         (
             "TaskNotFoundError",
@@ -44,7 +48,6 @@ async def _provoke(
             if eid not in before:
                 record = await ctx.wb.exchanges.get(eid)
         out.append((name, error, record))
-    ctx.cache["error_probes"] = out
     return out
 
 

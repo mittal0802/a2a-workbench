@@ -106,7 +106,18 @@ describe("HealthView", () => {
     expect(stop).toHaveBeenCalledWith("r1");
   });
 
+  it("keeps polling a running check even if the finished event was missed", async () => {
+    vi.spyOn(api, "listHealthRuns").mockResolvedValue([run({ status: "running" })]);
+    const get = vi.spyOn(api, "getHealthRun").mockResolvedValue(run({ status: "running", score: null }));
+    setup();
+    await screen.findByRole("button", { name: "Stop" });
+    get.mockResolvedValue(run());
+    await waitFor(() => expect(screen.getByTestId("score")).toHaveTextContent("75"), { timeout: 4000 });
+  });
+
   it("summarizes runs", () => {
+    expect(headline(run({ counts: { not_supported: 4, error: 1 } }))).toBe("Nothing could be checked");
+    expect(headline(run({ status: "stopped", counts: { pass: 3 } }))).toBe("Stopped early: every check run so far passed");
     expect(headline(run({ counts: { pass: 3 } }))).toBe("Healthy: every applicable check passed");
     expect(headline(run({ counts: { pass: 3, warn: 2 } }))).toBe("Healthy, with 2 suggestions");
     expect(gaugeBackground({ pass: 1, fail: 1 })).toBe(

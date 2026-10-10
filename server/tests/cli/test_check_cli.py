@@ -50,3 +50,11 @@ def test_check_usage_errors(zoo):
     assert runner.invoke(app, ["check", zoo.base_url, "--area", "Z"]).exit_code == 2
     assert runner.invoke(app, ["check", zoo.base_url, "--format", "pdf"]).exit_code == 2
     assert runner.invoke(app, ["check", zoo.base_url, "--faults", "nope"]).exit_code == 2
+
+
+def test_check_fails_when_nothing_could_be_checked():
+    with ZooServer(auth="bearer", grpc=False) as zoo:
+        r = runner.invoke(app, ["check", zoo.base_url, "--area", "F", "--json"])
+    report = json.loads(r.stdout)
+    assert all(x["status"] == "not_supported" for x in report["results"])
+    assert r.exit_code == 1 and "Nothing could be checked" in r.stderr

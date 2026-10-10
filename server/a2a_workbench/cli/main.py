@@ -1407,7 +1407,8 @@ def check(
     """Run the conformance health checks against an agent and report the results.
 
     Progress goes to stderr (NDJSON with --format json). Exit codes: 0 when no
-    result reaches --fail-on, 1 when one does, others as for every command.
+    result reaches --fail-on, 1 when one does or when nothing could be checked,
+    6 when some checks could not run, others as for every command.
     """
     from a2a_workbench.core.faults.profile import load_profile
     from a2a_workbench.core.health.model import AREAS
@@ -1463,5 +1464,14 @@ def check(
     else:
         typer.echo(text)
     failing = {"fail"} if fail_on == "fail" else {"fail", "warn"}
-    if any(r["status"] in failing for r in report["results"]):
+    statuses = [r["status"] for r in report["results"]]
+    if any(s in failing for s in statuses):
         raise typer.Exit(ExitCode.CHECKS_FAILED)
+    if not any(s in ("pass", "warn", "fail") for s in statuses):
+        typer.echo(
+            "Nothing could be checked: every check was not supported or could not run.", err=True
+        )
+        raise typer.Exit(ExitCode.CHECKS_FAILED)
+    if "error" in statuses:
+        typer.echo("Some checks could not run; see the results marked ERR.", err=True)
+        raise typer.Exit(ExitCode.INTERNAL)

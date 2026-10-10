@@ -114,3 +114,23 @@ def test_message_stream_with_more_events_fails():
         _record(operation="send_message", url="http://agent/v1/message:stream", frames=frames)
     )
     assert f.status == "fail" and "1 more" in f.actual
+
+
+def test_v03_stream_frames_are_read_by_kind():
+    frames = [
+        {
+            "t_ms": 1,
+            "data": "data: " + json.dumps({"result": {"contextId": "c", "kind": "task"}}),
+        },
+        {
+            "t_ms": 2,
+            "data": "data: " + json.dumps({"result": {"kind": "status-update"}}),
+        },
+    ]
+    rec = _record(
+        operation="send_message",
+        request_body=json.dumps({"jsonrpc": "2.0", "method": "message/stream"}),
+        frames=frames,
+    )
+    [f] = evaluate(rec)
+    assert f.status == "pass", f

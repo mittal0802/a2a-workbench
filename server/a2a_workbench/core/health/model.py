@@ -37,6 +37,14 @@ class Outcome(BaseModel):
     actual: str = ""
 
 
+class NotApplicable(Exception):
+    """Raised inside a check when the rule cannot be judged here (reported as not_supported)."""
+
+
+class WorkbenchFailure(Exception):
+    """Raised inside a check when the Workbench itself failed (reported as error)."""
+
+
 def passed(expected: str, actual: str) -> Outcome:
     """The agent met the rule."""
     return Outcome(kind="ok", expected=expected, actual=actual)

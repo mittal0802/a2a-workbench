@@ -107,3 +107,12 @@ def test_report_evidence_and_secrets(bearer_zoo):
             for eid in r["exchange_ids"]:
                 texts.append(json.dumps(c.get(f"/api/exchanges/{eid}").json()))
         assert all(ZOO_SECRETS["token"] not in t for t in texts)
+
+
+def test_stopping_a_run_that_is_not_active_is_a_conflict(client, zoo):
+    agent = client.post("/api/agents", json={"url": zoo.base_url}).json()
+    run_id = client.post(f"/api/agents/{agent['id']}/health/runs", json={"areas": ["A"]}).json()[
+        "run_id"
+    ]
+    _wait_done(client, run_id)
+    assert client.delete(f"/api/health/runs/{run_id}/active").status_code == 409

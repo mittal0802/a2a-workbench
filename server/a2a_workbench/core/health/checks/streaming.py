@@ -11,7 +11,7 @@ from a2a.types import AgentCard, Message, Part, Role
 from a2a_workbench.core.connection.client import open_client, select_interface
 from a2a_workbench.core.conversations.errors import classify_error
 from a2a_workbench.core.conversations.options import SendOptions, build_request
-from a2a_workbench.core.health.checks.common import call, describe, reason_of
+from a2a_workbench.core.health.checks.common import call, describe, guard, reason_of
 from a2a_workbench.core.health.context import TERMINAL_STATES, RunContext
 from a2a_workbench.core.health.model import Check, Outcome, passed, skipped, violated
 from a2a_workbench.core.health.registry import register
@@ -50,7 +50,7 @@ async def _undeclared(ctx: RunContext) -> Outcome:
             ):
                 events += 1
     except Exception as exc:
-        error = classify_error(exc)
+        error = guard(classify_error(exc))
     if reason_of(error) == "UNSUPPORTED_OPERATION":
         return passed("UnsupportedOperationError for SendStreamingMessage", describe(error))
     actual = describe(error) if error else f"streamed {events} event(s)"

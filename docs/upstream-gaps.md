@@ -42,3 +42,17 @@ Entry format:
 - Why we need it: health check J1 expects the rule; the zoo enforces it in its executor (`required_extension=True`) to stay conformant.
 - Proposal: in `DefaultRequestHandlerV2`, before dispatching any request, raise `ExtensionSupportRequiredError` listing the required extension URIs missing from `context.requested_extensions` (opt-out flag for agents that negotiate per skill).
 - Status: open.
+
+## The gRPC server does not validate `A2A-Version`
+- Where: SDK (`a2a-python` 1.2.2, `a2a/server/request_handlers/grpc_handler.py`)
+- Missing: `validate_version` is applied only in the JSON-RPC and REST dispatchers. Over gRPC, a request whose `a2a-version` metadata names an unsupported version is served as if it were 1.0, so A2A §3.6.2 (MUST answer `VersionNotSupportedError`) is broken by every SDK gRPC server.
+- Why we need it: health check B3 reports this as a failure on the gRPC interface of any SDK-built agent, including the Workbench's own reference agent.
+- Proposal: apply the same version validation to every `GrpcHandler` method (from the call's invocation metadata), mapping to `FAILED_PRECONDITION` per §5.4.
+- Status: open.
+
+## The v0.3 JSON-RPC compat server answers every A2A error with -32603
+- Where: SDK (`a2a-python` 1.2.2, `a2a/compat/v0_3/jsonrpc_adapter.py`, `_generate_error_response`)
+- Missing: only `JSONRPCError` instances keep their code; A2A errors such as `TaskNotFoundError` become `InternalError` (-32603), although A2A 0.3 defines -32001…-32007 for them.
+- Why we need it: clients of v0.3 agents cannot tell "task not found" from a server crash. The Workbench health checks cite A2A 1.0 and therefore report v0.3 interfaces as not supported instead of judging them.
+- Proposal: map A2A errors to their v0.3 JSON-RPC codes in the adapter, as the v1.0 dispatcher does.
+- Status: open.

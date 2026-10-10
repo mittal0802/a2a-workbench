@@ -38,7 +38,10 @@ export function gaugeBackground(counts: HealthRun["counts"]): string {
 export function headline(run: HealthRun): string {
   const fail = run.counts.fail ?? 0;
   const warn = run.counts.warn ?? 0;
+  const pass = run.counts.pass ?? 0;
   if (run.status === "running") return "Checking…";
+  if (!fail && !warn && !pass) return "Nothing could be checked";
+  if (run.status === "stopped" && !fail && !warn) return "Stopped early: every check run so far passed";
   if (!fail && !warn) return "Healthy: every applicable check passed";
   if (!fail) return `Healthy, with ${warn} ${warn === 1 ? "suggestion" : "suggestions"}`;
   return `${fail} ${fail === 1 ? "rule" : "rules"} broken${warn ? `, ${warn} ${warn === 1 ? "suggestion" : "suggestions"}` : ""}`;
@@ -173,6 +176,7 @@ export function HealthView({ agent }: { agent: Agent }) {
     queryKey: ["health-run", shownId],
     queryFn: () => api.getHealthRun(shownId!),
     enabled: !!shownId,
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 1500 : false),
   });
   const [areas, setAreas] = useState<string[] | null>(null);
   const [allInterfaces, setAllInterfaces] = useState(false);

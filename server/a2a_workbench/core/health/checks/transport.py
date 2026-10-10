@@ -57,6 +57,8 @@ async def _equivalent(ctx: RunContext) -> Outcome:
         i for i in ctx.card.supported_interfaces if supported(i) and i.url != ctx.interface_url
     ]
     reply = await ctx.reply()
+    if reply.kind == "error":
+        return skipped(f"the probe message failed: {describe(reply.error)}")
     if reply.kind != "task" or not reply.task_id:
         return skipped("the agent answered with a Message, so there is no task to compare")
     differences = []

@@ -55,8 +55,10 @@ async def _dropped(ctx: RunContext) -> tuple[str, str, str] | Outcome:
     Returns (conversation id, task id, state shortly after the drop), or an
     Outcome when every probe task finished (or waits for input) too soon to test.
     """
-    if "dropped" in ctx.cache:
-        return ctx.cache["dropped"]
+    return await ctx.cached("dropped", lambda: _drop_once(ctx))
+
+
+async def _drop_once(ctx: RunContext) -> tuple[str, str, str] | Outcome:
     found: tuple[str, str, str] | Outcome = skipped(
         "every probe finished before its stream could be dropped"
     )
@@ -78,7 +80,6 @@ async def _dropped(ctx: RunContext) -> tuple[str, str, str] | Outcome:
         if state in RUNNING or state == "canceled":
             found = (conv, task_id, state)
             break
-    ctx.cache["dropped"] = found
     return found
 
 

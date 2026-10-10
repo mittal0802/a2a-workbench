@@ -79,7 +79,10 @@ async def get_run(run_id: str, wb: Workbench = Depends(get_workbench)) -> Health
 @router.delete("/health/runs/{run_id}/active", status_code=204)
 async def stop_run(run_id: str, wb: Workbench = Depends(get_workbench)) -> Response:
     await wb.health.get(run_id)
-    await wb.health.stop(run_id)
+    if not await wb.health.stop(run_id):
+        raise HTTPException(
+            409, detail={"category": "workbench", "message": "this run is not in progress here"}
+        )
     return Response(status_code=204)
 
 

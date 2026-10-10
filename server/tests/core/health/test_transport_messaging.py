@@ -2,13 +2,16 @@ import pytest
 
 
 async def test_compliant_zoo_passes_b_c_e(health_of):
-    results, _ = await health_of(["B", "C", "E"], interfaces="all")
-    bad = {
-        k: (v.status, v.actual)
-        for k, v in results.items()
-        if v.status not in ("pass", "not_supported")
-    }
-    assert bad == {}
+    _, run = await health_of(["B", "C", "E"], interfaces="all")
+    bad = [
+        (r.check_id, r.interface, r.status)
+        for r in run.results
+        if r.status not in ("pass", "not_supported")
+    ]
+    # The SDK's gRPC server does not validate A2A-Version (docs/upstream-gaps.md),
+    # so the SDK-built zoo really violates A2A §3.6.2 there.
+    grpc = [i for i in run.interfaces if not i.startswith("http")]
+    assert bad == [("B3.version_unsupported", grpc[0], "fail")]
 
 
 @pytest.mark.parametrize(

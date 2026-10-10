@@ -17,6 +17,8 @@ async def _task(ctx: RunContext) -> Any:
     reply = await ctx.reply()
     if reply.kind == "error" and (reply.error or {}).get("category") == "auth":
         return skipped("the agent requires sign-in; add credentials to check this")
+    if reply.kind == "error":
+        return skipped(f"the probe message failed: {describe(reply.error)}")
     if reply.kind != "task" or not reply.task_id:
         return skipped("the agent answered with a Message, so there is no task")
     return reply
