@@ -25,6 +25,11 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
+      command: "cd ../server && uv run a2a-workbench fixtures --port 9886 --no-grpc --breaks get-unknown-returns",
+      url: "http://127.0.0.1:9886/.well-known/agent-card.json",
+      reuseExistingServer: false,
+    },
+    {
       command: "cd ../server && uv run a2a-workbench fixtures --llm --port 9897",
       url: "http://127.0.0.1:9897/ready",
       reuseExistingServer: false,

@@ -378,9 +378,30 @@ def fixtures(
             "--llm", help="Serve the scripted test LLM (OpenAI-compatible) instead of an agent."
         ),
     ] = False,
+    breaks: Annotated[
+        str | None,
+        typer.Option(
+            "--breaks",
+            help="Spec violations to commit, comma-separated (see --list-breaks).",
+        ),
+    ] = None,
+    list_breaks: Annotated[
+        bool, typer.Option("--list-breaks", help="List the available violations and exit.")
+    ] = False,
 ) -> None:
     """Run the zoo reference agent (or, with --llm, the scripted test LLM) until interrupted."""
     import uvicorn
+
+    from a2a_workbench.fixtures.broken import BREAKS
+
+    if list_breaks:
+        for name, meaning in BREAKS.items():
+            typer.echo(f"{name}: {meaning}")
+        return
+    chosen = frozenset(b.strip() for b in (breaks or "").split(",") if b.strip())
+    if unknown := sorted(chosen - set(BREAKS)):
+        typer.echo(f"unknown breaks: {', '.join(unknown)} (see --list-breaks)", err=True)
+        raise typer.Exit(ExitCode.USAGE)
 
     if llm:
         from a2a_workbench.fixtures.llm import build_fake_openai_app
@@ -398,7 +419,8 @@ def fixtures(
     typer.echo(
         f"Zoo agent at {base_url}"
         + (f" (gRPC on {host}:{grpc})" if grpc else "")
-        + (" speaking A2A 0.3" if legacy else ""),
+        + (" speaking A2A 0.3" if legacy else "")
+        + (f" breaking: {', '.join(sorted(chosen))}" if chosen else ""),
         err=True,
     )
     if auth != "none":
@@ -418,7 +440,13 @@ def fixtures(
             err=True,
         )
     app_ = build_zoo_app(
-        base_url, signed=not unsigned, grpc_port=grpc, legacy=legacy, auth=auth, idp=idp
+        base_url,
+        signed=not unsigned,
+        grpc_port=grpc,
+        legacy=legacy,
+        auth=auth,
+        idp=idp,
+        breaks=chosen,
     )
     uvicorn.run(app_, host=host, port=port)
 

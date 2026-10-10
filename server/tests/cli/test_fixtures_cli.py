@@ -74,3 +74,47 @@ def test_fixtures_serves_the_scripted_llm():
     finally:
         proc.terminate()
         proc.wait(10)
+
+
+def test_fixtures_lists_and_validates_breaks():
+    from typer.testing import CliRunner
+
+    from a2a_workbench.cli.main import app
+
+    runner = CliRunner()
+    listed = runner.invoke(app, ["fixtures", "--list-breaks"])
+    assert listed.exit_code == 0 and "get-unknown-returns:" in listed.stdout
+    bad = runner.invoke(app, ["fixtures", "--breaks", "nope"])
+    assert bad.exit_code == 2 and "unknown breaks: nope" in bad.stderr
+
+
+def test_fixtures_serves_a_broken_zoo():
+    port = free_port()
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "from a2a_workbench.cli.main import app; app()",
+            "fixtures",
+            "--port",
+            str(port),
+            "--no-grpc",
+            "--breaks",
+            "card-no-cache",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        resp = None
+        for _ in range(100):
+            try:
+                resp = httpx.get(f"http://127.0.0.1:{port}/.well-known/agent-card.json")
+                break
+            except httpx.TransportError:
+                time.sleep(0.1)
+        assert resp is not None and resp.status_code == 200
+        assert "max-age" not in resp.headers.get("cache-control", "")
+    finally:
+        proc.terminate()
+        proc.wait(5)
