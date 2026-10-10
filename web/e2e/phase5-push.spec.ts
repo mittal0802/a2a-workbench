@@ -3,7 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 async function openZoo(page: Page) {
   await page.goto("/");
   const existing = page.getByRole("link", { name: /zoo agent/i }).first();
-  if (await existing.isVisible().catch(() => false)) {
+  const known = await existing.waitFor({ state: "visible", timeout: 5000 }).then(() => true, () => false);
+  if (known) {
     await existing.click();
   } else {
     await page.getByRole("button", { name: /connect an agent/i }).first().click();
