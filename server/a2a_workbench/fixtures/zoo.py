@@ -328,7 +328,7 @@ def build_zoo_card(
                 name="Ask",
                 description="Asks a question before finishing.",
                 tags=["test"],
-                examples=["ask"],
+                examples=["ask", "long"],
             ),
         ],
     )

@@ -74,6 +74,8 @@ BREAKS: dict[str, str] = {
     "no-challenge": "401 without WWW-Authenticate (A2A §3.3.2)",
     "extension-not-enforced": "a required extension is not enforced (A2A §3.3.4)",
     "wrong-error-codes": "InvalidParams instead of TaskNotFound / TaskNotCancelable (A2A §5.4)",
+    "cancel-on-disconnect": "cancels a task when its stream drops (A2A §3.5.2)",
+    "single-subscriber": "a second stream for a task closes after the Task (A2A §3.5.2)",
 }
 
 
@@ -107,6 +109,8 @@ class BrokenHandler(DefaultRequestHandlerV2):
     def __init__(self, *args: Any, breaks: frozenset[str] = frozenset(), **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.breaks = breaks
+        self._subscribers: dict[str, int] = {}
+        self._background: set[asyncio.Task[Any]] = set()
 
     async def on_message_send(
         self, params: SendMessageRequest, context: ServerCallContext
@@ -222,15 +226,28 @@ class BrokenHandler(DefaultRequestHandlerV2):
             if "streaming-undeclared-works" in self.breaks
             else super().on_message_send_stream(params, context)
         )
-        async for event in source:
-            if first and isinstance(event, Task) and "stream-status-first" in self.breaks:
-                yield TaskStatusUpdateEvent(
-                    task_id=event.id, context_id=event.context_id, status=event.status
+        task_id = None
+        finished = False
+        try:
+            async for event in source:
+                if isinstance(event, Task):
+                    task_id = event.id
+                if first and isinstance(event, Task) and "stream-status-first" in self.breaks:
+                    yield TaskStatusUpdateEvent(
+                        task_id=event.id, context_id=event.context_id, status=event.status
+                    )
+                first = False
+                finished = finished or _terminal_event(event) or _interrupted_event(event)
+                yield event
+                if "stream-no-close" in self.breaks and _terminal_event(event):
+                    await asyncio.sleep(20)
+        finally:
+            if task_id and not finished and "cancel-on-disconnect" in self.breaks:
+                job = asyncio.create_task(
+                    self.on_cancel_task(CancelTaskRequest(id=task_id), context)
                 )
-            first = False
-            yield event
-            if "stream-no-close" in self.breaks and _terminal_event(event):
-                await asyncio.sleep(20)
+                self._background.add(job)
+                job.add_done_callback(self._background.discard)
 
     async def on_subscribe_to_task(
         self, params: SubscribeToTaskRequest, context: ServerCallContext
@@ -245,16 +262,31 @@ class BrokenHandler(DefaultRequestHandlerV2):
             yield task
             return
         first = True
-        async for event in super().on_subscribe_to_task(params, context):
-            if first and isinstance(event, Task) and "subscribe-no-task-first" in self.breaks:
+        self._subscribers[params.id] = self._subscribers.get(params.id, 0) + 1
+        crowded = self._subscribers[params.id] > 1 and "single-subscriber" in self.breaks
+        try:
+            async for event in super().on_subscribe_to_task(params, context):
+                if first and isinstance(event, Task) and "subscribe-no-task-first" in self.breaks:
+                    first = False
+                    continue
                 first = False
-                continue
-            first = False
-            yield event
+                yield event
+                if crowded:
+                    return
+        finally:
+            self._subscribers[params.id] -= 1
 
 
 def _invented(task_id: str, state: Any) -> Task:
     return Task(id=task_id, context_id="invented", status=TaskStatus(state=state))
+
+
+def _interrupted_event(event: Any) -> bool:
+    status = getattr(event, "status", None)
+    return status is not None and status.state in (
+        TaskState.TASK_STATE_INPUT_REQUIRED,
+        TaskState.TASK_STATE_AUTH_REQUIRED,
+    )
 
 
 def _terminal_event(event: Any) -> bool:

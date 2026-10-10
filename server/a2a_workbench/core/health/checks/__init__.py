@@ -6,6 +6,7 @@ from a2a_workbench.core.health.checks import (  # noqa: F401
     extensions,
     messaging,
     push,
+    resilience,
     security,
     streaming,
     tasks,
