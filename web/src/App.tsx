@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { AssistantPage } from "./features/assistant/AssistantPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { AgentPage } from "./features/agent/AgentPage";
+import { HealthPage } from "./features/health/HealthPage";
 
 function Home({ onConnect }: { onConnect: () => void }) {
   return (
@@ -37,6 +38,7 @@ function Shell() {
           <Route path="/agents/:agentId/:tab?" element={<AgentPage />} />
           <Route path="/assistant/:sessionId?" element={<AssistantPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/health" element={<HealthPage />} />
         </Routes>
       </main>
       <ConnectDialog

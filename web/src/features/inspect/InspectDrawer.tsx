@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { CopyButton, downloadText } from "../../components/CopyButton";
 import { JsonView } from "../../components/JsonView";
 import { api } from "../../lib/api";
-import type { ExchangeRecord, ExchangeSummary } from "../../lib/types";
+import type { ExchangeRecord, ExchangeSummary, PassiveCheck } from "../../lib/types";
 import { getHub } from "../../lib/ws";
 
 const OPERATIONS: Record<string, string> = {
@@ -122,8 +122,37 @@ function Headers({ title, headers }: { title: string; headers: Record<string, st
   );
 }
 
-function Detail({ id }: { id: string }) {
-  const [view, setView] = useState<"Request" | "Response" | "Headers">("Request");
+const CHECK_TONE: Record<string, string> = { pass: "s-ok", warn: "s-warn", fail: "s-bad" };
+
+function Checks({ checks }: { checks: PassiveCheck[] }) {
+  if (checks.length === 0)
+    return <div className="no">No spec rule can be judged from this request alone.</div>;
+  return (
+    <div>
+      {checks.map((c) => (
+        <div key={c.check_id} className="row" style={{ alignItems: "flex-start" }} data-testid={`check-${c.check_id}`}>
+          <span className={`state ${CHECK_TONE[c.status] ?? ""}`} style={{ flex: "none" }}>
+            <i />
+            {c.status === "pass" ? "Pass" : c.status === "warn" ? "Warning" : "Fail"}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b>{c.title}</b>
+            <div className="no" style={{ fontSize: 12.5 }}>
+              Expected {c.expected}; got {c.actual}
+            </div>
+          </div>
+          <span className="no mono" style={{ fontSize: 11.5, flex: "none" }}>
+            {c.spec_ref}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Full wire detail of one recorded exchange: request, response, headers and the spec checks it allows. */
+export function ExchangeDetail({ id }: { id: string }) {
+  const [view, setView] = useState<"Request" | "Response" | "Headers" | "Checks">("Request");
   const ex = useQuery({ queryKey: ["exchange", id], queryFn: () => api.getExchange(id), retry: false });
   if (ex.isError)
     return (
@@ -140,9 +169,14 @@ function Detail({ id }: { id: string }) {
     <div className="dbody">
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
         <div className="seg">
-          {(["Request", "Response", "Headers"] as const).map((v) => (
+          {(["Request", "Response", "Headers", "Checks"] as const).map((v) => (
             <button key={v} className={view === v ? "on" : ""} onClick={() => setView(v)}>
               {v}
+              {v === "Checks" && (r.checks ?? []).some((c) => c.status !== "pass") && (
+                <span className="dot" aria-label="has findings" style={{ marginLeft: 4, color: "var(--red)" }}>
+                  •
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -182,6 +216,7 @@ function Detail({ id }: { id: string }) {
         ) : (
           <div className="no">No response body.</div>
         ))}
+      {view === "Checks" && <Checks checks={r.checks ?? []} />}
       {view === "Headers" && (
         <>
           <Headers title="Request headers" headers={r.request_headers} />
@@ -290,7 +325,7 @@ export function InspectDrawer({
             </button>
           ))}
         </div>
-        {selected && <Detail id={selected} />}
+        {selected && <ExchangeDetail id={selected} />}
       </div>
     </aside>
   );

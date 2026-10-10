@@ -99,6 +99,15 @@ export type ExchangeSummary = {
   complete?: boolean;
   fault?: string | null;
 };
+export type PassiveCheck = {
+  check_id: string;
+  title: string;
+  spec_ref: string;
+  level: string;
+  status: "pass" | "fail" | "warn";
+  expected: string;
+  actual: string;
+};
 export type ExchangeRecord = ExchangeSummary & {
   request_headers: Record<string, string>;
   request_body: string | null;
@@ -106,6 +115,40 @@ export type ExchangeRecord = ExchangeSummary & {
   response_body: string | null;
   frames: { t_ms: number; data: string }[];
   truncated: boolean;
+  checks?: PassiveCheck[];
+};
+export type HealthStatus = "pass" | "warn" | "fail" | "not_supported" | "error";
+export type HealthResult = {
+  check_id: string;
+  area: string;
+  title: string;
+  spec_ref: string;
+  level: "must" | "should";
+  interface: string | null;
+  status: HealthStatus;
+  expected: string;
+  actual: string;
+  fix_hint: string;
+  exchange_ids: string[];
+  duration_ms: number | null;
+};
+export type HealthRun = {
+  id: string;
+  agent_id: string;
+  conversation_id: string | null;
+  status: "running" | "done" | "stopped";
+  card_url: string;
+  areas: string[];
+  interfaces: string[];
+  score: number | null;
+  counts: Partial<Record<HealthStatus, number>>;
+  results: HealthResult[];
+  started_at: string;
+  finished_at: string | null;
+};
+export type HealthCatalogue = {
+  areas: Record<string, string>;
+  checks: { id: string; area: string; title: string; spec_ref: string; level: string; fix_hint: string }[];
 };
 export type PartInput =
   | { kind: "text"; text: string }

@@ -27,6 +27,12 @@ export function Sidebar({ onConnect }: { onConnect: () => void }) {
         </svg>
         Assistant
       </NavLink>
+      <NavLink to="/health" className={({ isActive }) => `nav ${isActive ? "on" : ""}`}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        </svg>
+        Health checks
+      </NavLink>
       <div className="group">
         Your agents
         <button onClick={onConnect} title="Connect an agent" aria-label="Add agent">
