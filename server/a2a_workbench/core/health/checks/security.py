@@ -17,11 +17,9 @@ def _requires_auth(ctx: RunContext) -> str | None:
 
 
 async def _probe(ctx: RunContext) -> dict[str, object]:
-    key = f"auth_probe:{ctx.interface_url}"
-    if key not in ctx.cache:
-        results = await ctx.wb.auth.probe(ctx.agent.id, ctx.card, ctx.interface_url)
-        ctx.cache[key] = {r.check: r for r in results}
-    return ctx.cache[key]
+    """Run the enforcement probe; its calls become the current check's evidence."""
+    results = await ctx.wb.auth.probe(ctx.agent.id, ctx.card, ctx.interface_url)
+    return {r.check: r for r in results}
 
 
 def _judge(result: object, expected: str) -> Outcome:

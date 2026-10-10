@@ -186,3 +186,23 @@ async def test_send_message_unknown_conversation_returns_error(zoo):
             {"agent": zoo.base_url, "text": "x", "conversation_id": "nope"},
         )
         assert out["error"]["category"] == "workbench"
+
+
+async def test_mcp_health_tools():
+    from a2a_workbench.fixtures.runner import ZooServer
+
+    async with ZooServer(breaks={"get-unknown-returns"}) as zoo, connected() as c:
+        names = {t.name for t in (await c.list_tools()).tools}
+        assert {"run_health_check", "list_findings"} <= names
+        run = await call(c, "run_health_check", {"agent": zoo.base_url, "areas": ["f"]})
+        assert run["counts"]["fail"] == 1
+        [finding] = run["findings"]
+        assert finding["check_id"] == "F2.get_unknown" and finding["exchange_ids"]
+        exchange = await call(c, "get_exchange", {"exchange_id": finding["exchange_ids"][0]})
+        assert "checks" in exchange
+        latest = await call(c, "list_findings", {"agent": zoo.base_url})
+        assert [f["check_id"] for f in latest["findings"]] == ["F2.get_unknown"]
+        passed = await call(c, "list_findings", {"run_id": run["run_id"], "status": "pass"})
+        assert passed["findings"] and all(f["status"] == "pass" for f in passed["findings"])
+        missing = await call(c, "list_findings", {"run_id": "nope"})
+        assert missing["error"]["category"] == "workbench"

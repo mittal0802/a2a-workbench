@@ -14,10 +14,12 @@ from a2a_workbench.core.connection.client import InterfaceNotFoundError
 from a2a_workbench.core.conversations.errors import classify_error
 from a2a_workbench.core.conversations.service import ConversationNotFoundError
 from a2a_workbench.core.errors import AgentCallError
+from a2a_workbench.core.health.runner import RunNotFoundError
 from a2a_workbench.core.registry.service import AgentExistsError, AgentNotFoundError
 
 _STATUS: dict[type[Exception], int] = {
     AgentNotFoundError: 404,
+    RunNotFoundError: 404,
     ConversationNotFoundError: 404,
     SessionNotFoundError: 404,
     TurnInProgressError: 409,

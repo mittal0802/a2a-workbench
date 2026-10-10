@@ -88,6 +88,72 @@ class HealthService:
     def __init__(self, wb: Any, *, checks: list[Check] | None = None) -> None:
         self._wb = wb
         self._checks = checks
+        self._running: dict[str, tuple[asyncio.Task[None], AsyncIterator[ProgressEvent]]] = {}
+
+    async def start(
+        self,
+        agent_id: str,
+        *,
+        areas: list[str] | None = None,
+        interfaces: Literal["selected", "all"] = "selected",
+        faults: Any = None,
+    ) -> str:
+        """Start a run in the background and return its id once it is stored.
+
+        Raises:
+            AgentNotFoundError: if the agent is not registered.
+        """
+        events = self.run(agent_id, areas=areas, interfaces=interfaces, faults=faults)
+        first = await anext(events)
+
+        async def drain() -> None:
+            try:
+                async for _ in events:
+                    pass
+            finally:
+                self._running.pop(first.run_id, None)
+
+        self._running[first.run_id] = (asyncio.create_task(drain()), events)
+        return first.run_id
+
+    def is_running(self, run_id: str) -> bool:
+        """Whether a run started with ``start`` is still in progress in this process."""
+        return run_id in self._running
+
+    async def stop(self, run_id: str) -> bool:
+        """Stop a background run (stored as ``stopped``); return False if it is not running."""
+        entry = self._running.pop(run_id, None)
+        if entry is None:
+            return False
+        task, events = entry
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        await events.aclose()  # type: ignore[attr-defined]
+        return True
+
+    async def findings(
+        self,
+        *,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+        statuses: tuple[str, ...] = ("fail", "warn", "error"),
+    ) -> list[Result]:
+        """Results with one of ``statuses`` from a run (default: the agent's latest run).
+
+        Raises:
+            RunNotFoundError: if the run does not exist or the agent has no runs.
+        """
+        if run_id is None:
+            runs = await self.list(agent_id=agent_id, limit=1)
+            if not runs:
+                raise RunNotFoundError("no health runs yet")
+            run = runs[0]
+        else:
+            run = await self.get(run_id)
+        return [r for r in run.results if r.status in statuses]
 
     @property
     def checks(self) -> list[Check]:
@@ -151,13 +217,6 @@ class HealthService:
             )
             return event
 
-        yield emit(
-            ProgressEvent(
-                run_id=run_id,
-                kind="started",
-                data={"checks": len(checks), "interfaces": [url for url, _ in targets]},
-            )
-        )
         results: list[Result] = []
         contexts = {
             url: RunContext(
@@ -172,6 +231,13 @@ class HealthService:
             for url, binding in targets
         }
         try:
+            yield emit(
+                ProgressEvent(
+                    run_id=run_id,
+                    kind="started",
+                    data={"checks": len(checks), "interfaces": [url for url, _ in targets]},
+                )
+            )
             for check in checks:
                 for url, _binding in targets if check.per_interface else targets[:1]:
                     result = await self._run_one(check, contexts[url], agent_id, conv.id)
