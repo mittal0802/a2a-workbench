@@ -3,6 +3,7 @@
 from typing import Any
 
 from a2a.types import AgentCard
+from pydantic import BaseModel
 
 from a2a_workbench.core.conversations.options import SendOptions
 from a2a_workbench.core.conversations.parts import AnyPartInput, TextPartInput
@@ -54,6 +55,28 @@ class RunContext:
         )
         return conv.id
 
+    def probe_texts(self) -> list[str]:
+        """Messages to probe with: the card's skill examples, else a greeting."""
+        texts = [ex for skill in self.card.skills for ex in skill.examples]
+        return texts or ["hello"]
+
+    async def reply(self, text: str | None = None, **kw: Any) -> "Reply":
+        """Send ``text`` (default: the first probe text) and return the folded reply."""
+        return fold(await self.send(text or self.probe_texts()[0], **kw))
+
+    async def open_task(self) -> "Reply | None":
+        """A task left waiting for input, found by trying up to three probe texts."""
+        if "open_task" in self.cache:
+            return self.cache["open_task"]
+        found = None
+        for text in self.probe_texts()[:3]:
+            r = await self.reply(text)
+            if r.kind == "task" and r.state in INTERRUPTED_STATES:
+                found = r
+                break
+        self.cache["open_task"] = found
+        return found
+
     async def send(
         self,
         text: str,
@@ -83,3 +106,56 @@ class RunContext:
             ):
                 self.created_tasks.append(e.task_id)
         return events
+
+
+class Reply(BaseModel):
+    """What one send produced, folded from its timeline events."""
+
+    kind: str  # "task" | "message" | "error" | "none"
+    task_id: str | None = None
+    context_id: str | None = None
+    state: str | None = None
+    task: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    artifacts: int = 0
+    messages: int = 0
+    first_event: str | None = None
+    events: int = 0
+
+
+TERMINAL_STATES = frozenset({"completed", "failed", "canceled", "rejected"})
+INTERRUPTED_STATES = frozenset({"input_required", "auth_required"})
+
+
+def fold(events: list[TimelineEvent]) -> Reply:
+    """Summarize a send's timeline events (user_message excluded)."""
+    agent = [e for e in events if e.kind != "user_message"]
+    reply = Reply(kind="none", events=len(agent))
+    if agent:
+        reply.first_event = agent[0].kind
+    for e in agent:
+        if e.kind in ("task", "status", "artifact"):
+            reply.kind = "task"
+            reply.task_id = e.task_id or reply.task_id
+            reply.context_id = e.context_id or reply.context_id
+            reply.state = e.data.get("state", reply.state)
+            if e.kind == "task":
+                reply.task = e.data.get("task")
+                reply.artifacts = max(
+                    reply.artifacts, len((reply.task or {}).get("artifacts") or [])
+                )
+            if e.kind == "artifact":
+                reply.artifacts = max(reply.artifacts, 1)
+            status = e.data.get("status") or (e.data.get("task") or {}).get("status") or {}
+            if status.get("message"):
+                reply.messages += 1
+        elif e.kind == "message":
+            if reply.kind == "none":
+                reply.kind = "message"
+            reply.context_id = e.context_id or reply.context_id
+            reply.messages += 1
+        elif e.kind in ("error", "connection_lost"):
+            reply.error = dict(e.data)
+            if reply.kind == "none":
+                reply.kind = "error"
+    return reply
