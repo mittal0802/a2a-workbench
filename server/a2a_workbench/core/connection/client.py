@@ -13,7 +13,6 @@ from a2a_workbench.core.faults.injector import FaultInjector, as_injector
 from a2a_workbench.core.faults.profile import FaultProfile
 
 SUPPORTED_BINDINGS = ("JSONRPC", "HTTP+JSON", "GRPC")
-_BINDING_PREFERENCE = ("JSONRPC", "HTTP+JSON", "GRPC")
 
 
 class InterfaceNotFoundError(LookupError):
@@ -24,13 +23,15 @@ class UnsupportedBindingError(ValueError):
     """Raised when an interface uses a protocol binding this build cannot speak."""
 
 
-def _rank(iface: AgentInterface) -> tuple[int, int]:
-    binding = (
-        _BINDING_PREFERENCE.index(iface.protocol_binding)
-        if iface.protocol_binding in _BINDING_PREFERENCE
-        else len(_BINDING_PREFERENCE)
+SUPPORTED_VERSIONS = ("1.0", "0.3")
+
+
+def supported(iface: AgentInterface) -> bool:
+    """Whether this client can use ``iface`` (binding and protocol version)."""
+    version = iface.protocol_version or "1.0"
+    return iface.protocol_binding in SUPPORTED_BINDINGS and any(
+        version == v or version.startswith(f"{v}.") for v in SUPPORTED_VERSIONS
     )
-    return binding, 0 if iface.protocol_version == "1.0" else 1
 
 
 interface_override: ContextVar[str | None] = ContextVar("a2aw_interface_override", default=None)
@@ -40,8 +41,8 @@ interface_override: ContextVar[str | None] = ContextVar("a2aw_interface_override
 def select_interface(card: AgentCard, url: str | None) -> AgentInterface:
     """Return the interface at ``url`` (or ``interface_override``), else the preferred one.
 
-    Preference: JSON-RPC, then HTTP+JSON, then gRPC; protocol version 1.0 first;
-    otherwise card order.
+    Without a URL, the first interface in the card's order that this client
+    supports is used (A2A §8.3.2: the first entry is the agent's preference).
 
     Raises:
         InterfaceNotFoundError: if ``url`` matches no interface, or the card has none.
@@ -55,7 +56,13 @@ def select_interface(card: AgentCard, url: str | None) -> AgentInterface:
         raise InterfaceNotFoundError(f"The agent card has no interface at {url}")
     if not interfaces:
         raise InterfaceNotFoundError("The agent card lists no supported interfaces")
-    return min(interfaces, key=_rank)
+    for iface in interfaces:
+        if supported(iface):
+            return iface
+    raise InterfaceNotFoundError(
+        "None of the card's interfaces uses a binding and version this client supports "
+        f"({', '.join(SUPPORTED_BINDINGS)}; A2A {', '.join(SUPPORTED_VERSIONS)})"
+    )
 
 
 def card_for_interface(card: AgentCard, iface: AgentInterface) -> AgentCard:

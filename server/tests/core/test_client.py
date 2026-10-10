@@ -32,14 +32,29 @@ async def _sink(_):
     return None
 
 
-def test_select_default_prefers_jsonrpc_v1():
+def test_select_default_is_the_first_supported_interface_in_card_order():
+    """A2A §8.3.2: clients MUST select the first supported entry of supportedInterfaces."""
     card = _card(
         ("g", "GRPC", "1.0"),
         ("r", "HTTP+JSON", "1.0"),
-        ("j3", "JSONRPC", "0.3"),
         ("j1", "JSONRPC", "1.0"),
     )
-    assert select_interface(card, None).url == "j1"
+    assert select_interface(card, None).url == "g"
+
+
+def test_select_default_skips_unsupported_bindings_and_versions():
+    card = _card(
+        ("ws", "WEBSOCKET", "1.0"),
+        ("old", "JSONRPC", "0.1"),
+        ("r", "HTTP+JSON", "0.3"),
+        ("j", "JSONRPC", "1.0"),
+    )
+    assert select_interface(card, None).url == "r"
+
+
+def test_select_default_with_nothing_supported_raises():
+    with pytest.raises(InterfaceNotFoundError):
+        select_interface(_card(("ws", "WEBSOCKET", "1.0")), None)
 
 
 def test_select_by_url():
