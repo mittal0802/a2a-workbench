@@ -56,6 +56,18 @@ beforeEach(() => {
 });
 
 describe("HealthView", () => {
+  it("says why it can't start when the check list fails to load", async () => {
+    vi.spyOn(api, "healthChecks").mockRejectedValue(new Error("not found"));
+    vi.spyOn(api, "listHealthRuns").mockResolvedValue([]);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <HealthView agent={agent as never} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/couldn't load the list of checks: not found/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check health" })).toBeDisabled();
+  });
+
   it("shows the score, findings with fix and spec ref, and opens evidence", async () => {
     vi.spyOn(api, "listHealthRuns").mockResolvedValue([run()]);
     vi.spyOn(api, "getHealthRun").mockResolvedValue(run());

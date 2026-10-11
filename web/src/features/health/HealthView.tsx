@@ -267,6 +267,12 @@ export function HealthView({ agent }: { agent: Agent }) {
               )}
               {(start.isError || stop.isError) && <div className="err">{((start.error ?? stop.error) as Error).message}</div>}
             </div>
+            {catalogue.isError && (
+              <div className="err" style={{ marginTop: 8 }}>
+                Couldn't load the list of checks: {(catalogue.error as Error).message}. If the Workbench server was started before it was
+                updated, restart it.
+              </div>
+            )}
           </div>
         </div>
 
