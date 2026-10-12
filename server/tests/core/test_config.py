@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from a2a_workbench.core.config import Settings
 
 
+@pytest.mark.default_database
 def test_defaults_use_home_state_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("A2AW_HOME", str(tmp_path))
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -14,6 +17,7 @@ def test_defaults_use_home_state_dir(tmp_path, monkeypatch):
     assert s.resolved_database_url == f"sqlite+aiosqlite:///{tmp_path / 'workbench.db'}"
 
 
+@pytest.mark.default_database
 def test_database_url_accepts_unprefixed_env(tmp_path, monkeypatch):
     monkeypatch.setenv("A2AW_HOME", str(tmp_path))
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@h/db")

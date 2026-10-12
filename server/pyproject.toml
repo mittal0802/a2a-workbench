@@ -28,8 +28,20 @@ dependencies = [
 [project.scripts]
 a2a-workbench = "a2a_workbench.cli.main:main"
 
+[project.optional-dependencies]
+postgres = [
+    "asyncpg>=0.30",
+]
+
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.25", "respx>=0.22", "ruff>=0.9", "mypy>=1.14"]
+dev = [
+    "pytest>=8",
+ "pytest-asyncio>=0.25",
+ "respx>=0.22",
+ "ruff>=0.9",
+ "mypy>=1.14",
+ "asyncpg>=0.30",
+]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -43,6 +55,7 @@ artifacts = ["a2a_workbench/static/**"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = ["default_database: keep the default database when the suite runs on Postgres"]
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`:UserWarning"]
 
 [tool.ruff]

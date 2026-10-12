@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from a2a_workbench.cli.main import app
@@ -7,6 +8,7 @@ from a2a_workbench.cli.main import app
 runner = CliRunner()
 
 
+@pytest.mark.default_database
 def test_db_current_then_upgrade():
     before = runner.invoke(app, ["db", "current", "--json"])
     assert before.exit_code == 0, before.output

@@ -39,21 +39,21 @@ class Base(DeclarativeBase):
 class Workspace(Base):
     __tablename__ = "workspace"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    name: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String())
 
 
 class Agent(Base):
     __tablename__ = "agent"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
-    name: Mapped[str] = mapped_column(String(200))
-    base_url: Mapped[str] = mapped_column(String(2000))
-    card_path: Mapped[str | None] = mapped_column(String(500), default=None)
+    name: Mapped[str] = mapped_column(String())
+    base_url: Mapped[str] = mapped_column(String())
+    card_path: Mapped[str | None] = mapped_column(String(), default=None)
     card: Mapped[dict[str, Any]]
     extended_card: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     signature_status: Mapped[str] = mapped_column(String(20))
-    signature_detail: Mapped[str | None] = mapped_column(String(1000), default=None)
-    selected_interface_url: Mapped[str | None] = mapped_column(String(2000), default=None)
+    signature_detail: Mapped[str | None] = mapped_column(String(), default=None)
+    selected_interface_url: Mapped[str | None] = mapped_column(String(), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -65,10 +65,10 @@ class Conversation(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
     agent_id: Mapped[str] = mapped_column(ForeignKey("agent.id"), index=True)
-    title: Mapped[str] = mapped_column(String(200), default="New conversation")
+    title: Mapped[str] = mapped_column(String(), default="New conversation")
     origin: Mapped[str] = mapped_column(String(20), default="chat")
-    context_id: Mapped[str | None] = mapped_column(String(200), default=None)
-    task_id: Mapped[str | None] = mapped_column(String(200), default=None)
+    context_id: Mapped[str | None] = mapped_column(String(), default=None)
+    task_id: Mapped[str | None] = mapped_column(String(), default=None)
     task_state: Mapped[str | None] = mapped_column(String(30), default=None)
     last_seq: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -85,8 +85,8 @@ class TimelineEventRow(Base):
     seq: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(30))
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    task_id: Mapped[str | None] = mapped_column(String(200), default=None)
-    context_id: Mapped[str | None] = mapped_column(String(200), default=None)
+    task_id: Mapped[str | None] = mapped_column(String(), default=None)
+    context_id: Mapped[str | None] = mapped_column(String(), default=None)
     exchange_id: Mapped[str | None] = mapped_column(String(32), default=None)
     data: Mapped[dict[str, Any]]
 
@@ -97,11 +97,11 @@ class ExchangeRow(Base):
     workspace_id: Mapped[str] = mapped_column(String(32), index=True, default=DEFAULT_WORKSPACE_ID)
     agent_id: Mapped[str | None] = mapped_column(String(32), index=True, default=None)
     conversation_id: Mapped[str | None] = mapped_column(String(32), index=True, default=None)
-    operation: Mapped[str] = mapped_column(String(100))
+    operation: Mapped[str] = mapped_column(String())
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[float | None] = mapped_column(Float, default=None)
     status: Mapped[int | None] = mapped_column(Integer, default=None)
-    error: Mapped[str | None] = mapped_column(String(2000), default=None)
+    error: Mapped[str | None] = mapped_column(String(), default=None)
     record: Mapped[dict[str, Any]]
 
 
@@ -109,8 +109,8 @@ class Blob(Base):
     __tablename__ = "blob"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(String(32), index=True, default=DEFAULT_WORKSPACE_ID)
-    media_type: Mapped[str] = mapped_column(String(200))
-    filename: Mapped[str | None] = mapped_column(String(500), default=None)
+    media_type: Mapped[str] = mapped_column(String())
+    filename: Mapped[str | None] = mapped_column(String(), default=None)
     size: Mapped[int] = mapped_column(Integer)
     data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -121,7 +121,7 @@ class Credential(Base):
     __table_args__ = (UniqueConstraint("agent_id", "scheme_name"),)
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     agent_id: Mapped[str] = mapped_column(String(32), index=True)
-    scheme_name: Mapped[str] = mapped_column(String(200))
+    scheme_name: Mapped[str] = mapped_column(String())
     kind: Mapped[str] = mapped_column(String(30))
     encrypted: Mapped[bytes] = mapped_column(LargeBinary)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
@@ -135,7 +135,7 @@ class ProviderKey(Base):
     __tablename__ = "provider_key"
     provider: Mapped[str] = mapped_column(String(30), primary_key=True)
     encrypted: Mapped[bytes] = mapped_column(LargeBinary)
-    base_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    base_url: Mapped[str | None] = mapped_column(String(), default=None)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
@@ -145,9 +145,9 @@ class AssistantSession(Base):
     __tablename__ = "assistant_session"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspace.id"), index=True)
-    title: Mapped[str] = mapped_column(String(200), default="New chat")
+    title: Mapped[str] = mapped_column(String(), default="New chat")
     provider: Mapped[str] = mapped_column(String(30))
-    model: Mapped[str] = mapped_column(String(200))
+    model: Mapped[str] = mapped_column(String())
     response_mode: Mapped[str] = mapped_column(String(20), default="rewrite")
     agent_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     limits: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -180,36 +180,36 @@ class PushHook(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     agent_id: Mapped[str] = mapped_column(String(32), index=True)
     conversation_id: Mapped[str | None] = mapped_column(String(32), default=None)
-    task_id: Mapped[str | None] = mapped_column(String(200), index=True, default=None)
-    url: Mapped[str | None] = mapped_column(String(2000), default=None)
+    task_id: Mapped[str | None] = mapped_column(String(), index=True, default=None)
+    url: Mapped[str | None] = mapped_column(String(), default=None)
     auth_scheme: Mapped[str] = mapped_column(String(30), default="Bearer")
     credentials_hash: Mapped[str] = mapped_column(String(64))
-    token_hash: Mapped[str] = mapped_column(String(64))
+    token_hash: Mapped[str] = mapped_column(String())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class PushDelivery(Base):
     __tablename__ = "push_delivery"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    hook_id: Mapped[str] = mapped_column(String(32), index=True)
+    hook_id: Mapped[str] = mapped_column(String(), index=True)
     agent_id: Mapped[str] = mapped_column(String(32), index=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    verdict: Mapped[str] = mapped_column(String(20))
+    verdict: Mapped[str] = mapped_column(String())
     reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
     notes: Mapped[list[str]] = mapped_column(JSON, default=list)
     duplicate: Mapped[bool] = mapped_column(default=False)
     kind: Mapped[str | None] = mapped_column(String(30), default=None)
-    task_id: Mapped[str | None] = mapped_column(String(200), default=None)
-    state: Mapped[str | None] = mapped_column(String(30), default=None)
+    task_id: Mapped[str | None] = mapped_column(String(), default=None)
+    state: Mapped[str | None] = mapped_column(String(), default=None)
     headers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     body: Mapped[str] = mapped_column(Text, default="")
-    body_hash: Mapped[str] = mapped_column(String(64), index=True)
+    body_hash: Mapped[str] = mapped_column(String(), index=True)
 
 
 class WorkbenchSetting(Base):
     __tablename__ = "workbench_setting"
-    key: Mapped[str] = mapped_column(String(100), primary_key=True)
-    value: Mapped[str] = mapped_column(String(2000))
+    key: Mapped[str] = mapped_column(String(), primary_key=True)
+    value: Mapped[str] = mapped_column(String())
 
 
 class HealthRun(Base):
@@ -218,7 +218,7 @@ class HealthRun(Base):
     agent_id: Mapped[str] = mapped_column(String(32), index=True)
     conversation_id: Mapped[str | None] = mapped_column(String(32), default=None)
     status: Mapped[str] = mapped_column(String(20), default="running")
-    card_url: Mapped[str] = mapped_column(String(2000), default="")
+    card_url: Mapped[str] = mapped_column(String(), default="")
     areas: Mapped[list[str]] = mapped_column(JSON, default=list)
     interfaces: Mapped[list[str]] = mapped_column(JSON, default=list)
     score: Mapped[int | None] = mapped_column(Integer, default=None)
