@@ -8,7 +8,7 @@ from a2a_workbench.core.store.db import Database
 
 async def test_store_persists_and_publishes(tmp_path):
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'x.db'}")
-    await db.create_schema()
+    await db.migrate()
     bus = EventBus()
     store = ExchangeStore(db, bus)
     ex = Exchange(
@@ -32,7 +32,7 @@ async def test_store_persists_and_publishes(tmp_path):
 
 async def test_store_upserts_in_flight_exchange(tmp_path):
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'y.db'}")
-    await db.create_schema()
+    await db.migrate()
     store = ExchangeStore(db, EventBus())
     ex = Exchange(
         id="e2",
@@ -56,7 +56,7 @@ async def test_store_upserts_in_flight_exchange(tmp_path):
 
 async def test_summary_includes_injected_fault(tmp_path):
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'z.db'}")
-    await db.create_schema()
+    await db.migrate()
     store = ExchangeStore(db, EventBus())
     await store(
         Exchange(

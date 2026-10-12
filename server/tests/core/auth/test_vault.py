@@ -44,3 +44,24 @@ def test_bad_environment_key_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv("A2AW_SECRET_KEY", "short")
     with pytest.raises(VaultError):
         load_vault_key(Settings(home=tmp_path))
+
+
+def test_concurrent_key_creation_agrees(tmp_path):
+    import multiprocessing
+
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(6) as pool:
+        for round_ in range(20):
+            home = tmp_path / f"h{round_}"
+            keys = pool.map(_load_key_in, [str(home)] * 6, chunksize=1)
+            assert len(set(keys)) == 1 and None not in keys, keys
+
+
+def _load_key_in(home):
+    from a2a_workbench.core.auth.vault import load_vault_key
+    from a2a_workbench.core.config import Settings
+
+    try:
+        return load_vault_key(Settings(home=home))
+    except Exception:
+        return None

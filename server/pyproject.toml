@@ -1,11 +1,25 @@
 [project]
 name = "a2a-workbench"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Debug, test and conformance-check any A2A agent: web UI, CLI and MCP server built on the official a2a-sdk"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 authors = [{ name = "Keshav Mittal", email = "mittalkeshav41@gmail.com" }]
+keywords = ["a2a", "agent2agent", "ai-agents", "conformance", "testing", "mcp"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Web Environment",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Debuggers",
+  "Topic :: Software Development :: Testing",
+]
 dependencies = [
   "a2a-sdk[grpc,http-server,signing]>=1.2.2,<1.3",
   "cryptography>=43",
@@ -22,17 +36,40 @@ dependencies = [
   "anthropic>=1.12.1",
   "openai>=3.26.1",
   "google-genai>=2.29.0",
+  "alembic>=1.14",
 ]
+
+[project.urls]
+Homepage = "https://mittal0802.github.io/a2a-workbench/"
+Documentation = "https://mittal0802.github.io/a2a-workbench/"
+Repository = "https://github.com/mittal0802/a2a-workbench"
+Issues = "https://github.com/mittal0802/a2a-workbench/issues"
+Changelog = "https://github.com/mittal0802/a2a-workbench/blob/main/CHANGELOG.md"
 
 [project.scripts]
 a2a-workbench = "a2a_workbench.cli.main:main"
 
+[project.optional-dependencies]
+postgres = [
+    "asyncpg>=0.30",
+]
+
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.25", "respx>=0.22", "ruff>=0.9", "mypy>=1.14"]
+dev = [
+    "pytest>=8",
+ "pytest-asyncio>=0.25",
+ "respx>=0.22",
+ "ruff>=0.9",
+ "mypy>=1.14",
+ "asyncpg>=0.30",
+]
 
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "a2a_workbench/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["a2a_workbench"]
@@ -42,6 +79,7 @@ artifacts = ["a2a_workbench/static/**"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = ["default_database: keep the default database when the suite runs on Postgres"]
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`:UserWarning"]
 
 [tool.ruff]

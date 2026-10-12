@@ -1,14 +1,13 @@
 from sqlalchemy import select
 
 from a2a_workbench.core.store.db import Database
-from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Agent, Workspace
+from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Agent
 
 
 async def test_create_schema_and_insert(tmp_path):
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'nested' / 't.db'}")
-    await db.create_schema()
+    await db.migrate()
     async with db.sessions() as s:
-        s.add(Workspace(id=DEFAULT_WORKSPACE_ID, name="Default"))
         s.add(
             Agent(
                 workspace_id=DEFAULT_WORKSPACE_ID,

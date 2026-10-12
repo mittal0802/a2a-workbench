@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
 import typer
+from sqlalchemy.engine import make_url
 
+from a2a_workbench import __version__
 from a2a_workbench.cli.output import ExitCode, HumanPrinter, exit_code_for, print_json
 from a2a_workbench.core.config import Settings
 from a2a_workbench.core.connection.cards import CardFetchError
@@ -26,6 +28,7 @@ from a2a_workbench.core.conversations.parts import (
 )
 from a2a_workbench.core.errors import AgentCallError
 from a2a_workbench.core.registry.service import AgentExistsError, AgentNotFoundError, AgentOut
+from a2a_workbench.core.store.db import Database, head_revision
 from a2a_workbench.core.workbench import Workbench
 
 app = typer.Typer(
@@ -33,6 +36,26 @@ app = typer.Typer(
     help="Debug, test and conformance-check A2A agents.",
     pretty_exceptions_enable=False,
 )
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(f"a2a-workbench {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", callback=_print_version, is_eager=True, help="Show the version and exit."
+        ),
+    ] = False,
+) -> None:
+    """Debug, test and conformance-check A2A agents."""
+
+
 agents_app = typer.Typer(no_args_is_help=True, help="Manage registered agents.")
 app.add_typer(agents_app, name="agents")
 tasks_app = typer.Typer(no_args_is_help=True, help="Get, list, cancel and resubscribe to tasks.")
@@ -47,6 +70,8 @@ chats_app = typer.Typer(no_args_is_help=True, help="Assistant chats: list, raw L
 app.add_typer(chats_app, name="chats")
 push_app = typer.Typer(no_args_is_help=True, help="Push notification configs and deliveries.")
 app.add_typer(push_app, name="push")
+db_app = typer.Typer(no_args_is_help=True, help="Database schema: show and apply migrations.")
+app.add_typer(db_app, name="db")
 
 FaultsOpt = Annotated[
     str | None,
@@ -1475,3 +1500,54 @@ def check(
     if "error" in statuses:
         typer.echo("Some checks could not run; see the results marked ERR.", err=True)
         raise typer.Exit(ExitCode.INTERNAL)
+
+
+def _open_database(as_json: bool) -> tuple[Database, str]:
+    url = Settings().resolved_database_url
+    shown = make_url(url).render_as_string(hide_password=True)
+    try:
+        return Database(url), shown
+    except Exception as exc:
+        _fail("workbench", f"cannot open the database {shown}: {exc}", as_json)
+
+
+@db_app.command("current")
+def db_current(as_json: JsonFlag = False) -> None:
+    """Show the database's schema revision and the newest one this version ships."""
+
+    async def go() -> None:
+        db, shown = _open_database(as_json)
+        try:
+            revision = await db.revision()
+        except Exception as exc:
+            _fail("workbench", f"cannot read the database {shown}: {exc}", as_json)
+        finally:
+            await db.dispose()
+        out = {"revision": revision, "head": head_revision(), "database": shown}
+        if as_json:
+            print_json(out)
+            return
+        typer.echo(f"{shown}\nrevision {revision or 'none'} (newest {out['head']})")
+
+    _run(go())
+
+
+@db_app.command("upgrade")
+def db_upgrade(as_json: JsonFlag = False) -> None:
+    """Apply pending migrations; the server also does this when it starts."""
+
+    async def go() -> None:
+        db, shown = _open_database(as_json)
+        try:
+            await db.migrate()
+            revision = await db.revision()
+        except Exception as exc:
+            _fail("workbench", f"cannot migrate the database {shown}: {exc}", as_json)
+        finally:
+            await db.dispose()
+        if as_json:
+            print_json({"revision": revision, "database": shown})
+            return
+        typer.echo(f"{shown} is at revision {revision}")
+
+    _run(go())

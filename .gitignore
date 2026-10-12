@@ -13,3 +13,5 @@ web/playwright-report/
 .mypy_cache/
 *.db
 *.tsbuildinfo
+.env
+site/

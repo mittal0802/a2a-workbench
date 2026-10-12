@@ -1,0 +1,32 @@
+# A2A Workbench on Postgres. Put POSTGRES_PASSWORD=<a strong password> in a .env file next to this one.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: workbench
+      POSTGRES_DB: workbench
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workbench -d workbench"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  workbench:
+    image: ghcr.io/mittal0802/a2a-workbench:latest
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      A2AW_DATABASE_URL: postgresql+asyncpg://workbench:${POSTGRES_PASSWORD}@postgres:5432/workbench
+    ports:
+      - "127.0.0.1:8484:8484"
+    volumes:
+      - workbench-data:/data
+
+volumes:
+  postgres-data:
+  workbench-data:

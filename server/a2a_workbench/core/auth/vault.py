@@ -2,8 +2,11 @@
 
 import base64
 import binascii
+import contextlib
 import json
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
@@ -50,7 +53,8 @@ class Vault:
 def load_vault_key(settings: Settings) -> bytes:
     """Return the vault key from ``settings.secret_key`` (base64) or ``<home>/secret.key``.
 
-    The key file is created with mode 0600 when missing.
+    The key file is created with mode 0600 when missing; concurrent callers
+    on a fresh home all get the same key.
 
     Raises:
         VaultError: if the configured key is not 32 bytes of base64.
@@ -64,14 +68,25 @@ def load_vault_key(settings: Settings) -> bytes:
             raise VaultError("A2AW_SECRET_KEY must decode to 32 bytes")
         return key
     path = settings.home / "secret.key"
-    if path.exists():
-        key = base64.b64decode(path.read_text().strip())
-        if len(key) != 32:
-            raise VaultError(f"{path} does not hold a 32-byte key")
-        return key
-    settings.home.mkdir(parents=True, exist_ok=True)
-    key = os.urandom(32)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(base64.b64encode(key).decode())
+    if not path.exists():
+        _create_key_file(path)
+    key = base64.b64decode(path.read_text().strip())
+    if len(key) != 32:
+        raise VaultError(f"{path} does not hold a 32-byte key")
     return key
+
+
+def _create_key_file(path: Path) -> None:
+    # Write the whole key to a private temp file, then hard-link it into place:
+    # the link appears atomically and complete, and when another process wins
+    # the race its key is kept and read instead.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".secret.key.")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(base64.b64encode(os.urandom(32)).decode())
+        os.chmod(tmp, 0o600)
+        with contextlib.suppress(FileExistsError):
+            os.link(tmp, path)
+    finally:
+        os.unlink(tmp)
