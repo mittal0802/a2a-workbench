@@ -40,3 +40,10 @@ def test_every_documented_setting_has_a_description():
 def test_check_reports_a_stale_file(tmp_path):
     out = _gen("--check", "--out", str(tmp_path))
     assert out.returncode == 1
+
+
+def test_docker_examples_bind_to_localhost():
+    published = [p for p in (ROOT / "docs").rglob("*.md") if "superpowers" not in p.parts]
+    pages = [ROOT / "README.md", ROOT / "server/README.md", *published]
+    exposed = [str(p) for p in pages if "-p 8484:8484" in p.read_text()]
+    assert exposed == []

@@ -32,7 +32,7 @@ Databases created by versions before 1.0 are upgraded in place, keeping their da
 
 ## Exposing it
 
-The server answers only to `localhost`, `127.0.0.1`, `::1` and its bind address, and rejects cross-site `Origin`s (DNS-rebinding protection). To open it under another name, set `A2AW_ALLOWED_HOSTS`. It has no sign-in of its own: do not expose it to an untrusted network. So agents on other machines can deliver push notifications, set `A2AW_PUBLIC_BASE_URL` to an address they can reach.
+The server answers only to `localhost`, `127.0.0.1`, `::1` and its bind address, and rejects cross-site `Origin`s (DNS-rebinding protection). To open it under another name, set `A2AW_ALLOWED_HOSTS`. These checks only stop DNS rebinding from web pages; they are not access control. The Workbench has no sign-in of its own, so anyone who can reach its port can use it and the credentials it stores: publish the port on `127.0.0.1` only (as above), or put it behind your own authentication. So agents on other machines can deliver push notifications, set `A2AW_PUBLIC_BASE_URL` to an address they can reach.
 
 ## Keys
 

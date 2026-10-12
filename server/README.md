@@ -21,7 +21,7 @@ a2a-workbench serve --open          # web UI on http://127.0.0.1:8484
 Or with Docker:
 
 ```bash
-docker run -p 8484:8484 -v a2aw:/data ghcr.io/mittal0802/a2a-workbench
+docker run -p 127.0.0.1:8484:8484 -v a2aw:/data ghcr.io/mittal0802/a2a-workbench
 ```
 
 Postgres instead of the default SQLite: `pipx install 'a2a-workbench[postgres]'` and set `A2AW_DATABASE_URL=postgresql+asyncpg://user:password@host/db`.

@@ -17,7 +17,7 @@
 === "Docker"
 
     ```bash
-    docker run -p 8484:8484 -v a2aw:/data ghcr.io/mittal0802/a2a-workbench
+    docker run -p 127.0.0.1:8484:8484 -v a2aw:/data ghcr.io/mittal0802/a2a-workbench
     ```
 
 The web UI opens on <http://127.0.0.1:8484>. The package needs Python 3.12 or newer.

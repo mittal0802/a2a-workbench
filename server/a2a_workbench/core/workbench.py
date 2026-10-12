@@ -22,7 +22,6 @@ from a2a_workbench.core.push.service import PushService
 from a2a_workbench.core.push.tunnel import Tunnel
 from a2a_workbench.core.registry.service import AgentService
 from a2a_workbench.core.store.db import Database
-from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Workspace
 from a2a_workbench.core.tasks.service import TaskService
 
 
@@ -97,10 +96,6 @@ class Workbench:
         """Create the state directory, the schema and the default workspace; close stale runs."""
         self.settings.home.mkdir(parents=True, exist_ok=True)
         await self.db.migrate()
-        async with self.db.sessions() as session:
-            if await session.get(Workspace, DEFAULT_WORKSPACE_ID) is None:
-                session.add(Workspace(id=DEFAULT_WORKSPACE_ID, name="Default"))
-                await session.commit()
         await self.health.recover()
 
     async def close(self) -> None:

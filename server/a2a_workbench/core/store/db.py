@@ -7,12 +7,12 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import event, inspect
+from sqlalchemy import event, inspect, select
 from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from a2a_workbench.core.store.models import Base
+from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Base, Workspace
 
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 BASELINE = "0001"
@@ -37,13 +37,15 @@ class Database:
 
     For SQLite file URLs the parent directory is created if missing, and
     connections wait up to 5 s for a lock (``busy_timeout``) instead of
-    failing at once.
+    failing at once. An in-memory SQLite database exists only in this
+    engine's connection.
     """
 
     def __init__(self, url: str) -> None:
         parsed = make_url(url)
         self._url = url
         self._sqlite = parsed.get_backend_name() == "sqlite"
+        self._memory = self._sqlite and parsed.database in (None, "", ":memory:")
         if self._sqlite and parsed.database:
             Path(parsed.database).parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_async_engine(url)
@@ -54,20 +56,23 @@ class Database:
         )
 
     async def migrate(self) -> None:
-        """Bring the schema to the latest revision; safe to call on every start.
+        """Bring the schema to the latest revision and create the default workspace.
 
-        Runs under a database-wide lock so concurrent processes migrate once.
+        Safe to call on every start: it runs under a database-wide lock, so
+        concurrent processes migrate and seed once.
         A database created before migrations existed (tables but no
         ``alembic_version``) is first completed to the current models,
         keeping its rows, and stamped.
         """
-        engine = self.engine
-        if self._sqlite:
+        engine, lock = self.engine, True
+        if self._memory:
+            lock = False  # private to this process: nothing to race with
+        elif self._sqlite:
             engine = create_async_engine(self._url, poolclass=NullPool)
             _sqlite_explicit_transactions(engine.sync_engine)
         try:
             async with engine.connect() as conn:
-                await conn.run_sync(_migrate)
+                await conn.run_sync(_migrate, lock=lock)
                 await conn.commit()
         finally:
             if engine is not self.engine:
@@ -105,8 +110,10 @@ def _sqlite_explicit_transactions(engine: Any) -> None:
             conn.exec_driver_sql("BEGIN")
 
 
-def _migrate(conn: Connection) -> None:
-    if conn.dialect.name == "postgresql":
+def _migrate(conn: Connection, *, lock: bool) -> None:
+    if not lock:
+        pass
+    elif conn.dialect.name == "postgresql":
         conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_LOCK_ID})")
     elif conn.dialect.name == "sqlite":
         conn.info["begun"] = True
@@ -118,6 +125,12 @@ def _migrate(conn: Connection) -> None:
         _add_missing_columns(conn)
         command.stamp(cfg, "head")
     command.upgrade(cfg, "head")
+    workspace = Workspace.__table__
+    if (
+        conn.execute(select(workspace.c.id).where(workspace.c.id == DEFAULT_WORKSPACE_ID)).first()
+        is None
+    ):
+        conn.execute(workspace.insert().values(id=DEFAULT_WORKSPACE_ID, name="Default"))
 
 
 def _add_missing_columns(conn: Connection) -> None:

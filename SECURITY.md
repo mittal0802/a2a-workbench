@@ -12,4 +12,4 @@ Security fixes go into the latest release.
 
 ## Scope notes
 
-The Workbench is a local developer tool: it answers only to local host names, has no sign-in of its own, and should not be exposed to an untrusted network. Stored credentials are encrypted with `A2AW_SECRET_KEY` (or a generated key in the home directory), never logged and redacted in recorded traffic.
+The Workbench is a local developer tool with no sign-in of its own: anyone who can reach its port can use it, including the credentials it stores. Keep it on `127.0.0.1` (with Docker, `-p 127.0.0.1:8484:8484`) or behind your own access control. Its host and `Origin` checks protect against DNS rebinding from web pages you visit; they are not a network boundary. Stored credentials are encrypted with `A2AW_SECRET_KEY` (or a generated key in the home directory), never logged and redacted in recorded traffic.
