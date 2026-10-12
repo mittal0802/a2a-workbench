@@ -85,3 +85,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: docker build -t a2a-workbench:ci .
+      - name: Smoke-test the image
+        run: |
+          docker volume create a2aw-data
+          docker run -d --name a2aw -p 8484:8484 -v a2aw-data:/data a2a-workbench:ci
+          for i in $(seq 1 30); do curl -fs localhost:8484/api/health && break; sleep 1; done
+          curl -fs localhost:8484/api/health | grep -q '"version":"1.0.0"'
+          curl -fs localhost:8484/ | grep -q '<div id="root">'
+          test "$(docker exec a2aw id -u)" = 10001
+          docker exec a2aw a2a-workbench db current --json | grep -q '"revision": "0001"'
+          docker exec a2aw python -c "import asyncpg"
+          for i in $(seq 1 40); do [ "$(docker inspect -f '{{.State.Health.Status}}' a2aw)" = healthy ] && break; sleep 1; done
+          test "$(docker inspect -f '{{.State.Health.Status}}' a2aw)" = healthy
+      - name: Smoke-test the compose example on Postgres
+        run: |
+          docker rm -f a2aw
+          echo "POSTGRES_PASSWORD=ci-only" > .env
+          docker compose up -d --wait --build
+          curl -fs localhost:8484/api/health
+          docker compose exec -T workbench a2a-workbench db current --json | grep -q '"database": "postgresql+asyncpg://workbench:\*\*\*@postgres'
+          docker compose down -v
