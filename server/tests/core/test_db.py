@@ -6,7 +6,7 @@ from a2a_workbench.core.store.models import DEFAULT_WORKSPACE_ID, Agent, Workspa
 
 async def test_create_schema_and_insert(tmp_path):
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'nested' / 't.db'}")
-    await db.create_schema()
+    await db.migrate()
     async with db.sessions() as s:
         s.add(Workspace(id=DEFAULT_WORKSPACE_ID, name="Default"))
         s.add(

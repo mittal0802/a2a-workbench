@@ -96,7 +96,7 @@ class Workbench:
     async def start(self) -> None:
         """Create the state directory, the schema and the default workspace; close stale runs."""
         self.settings.home.mkdir(parents=True, exist_ok=True)
-        await self.db.create_schema()
+        await self.db.migrate()
         async with self.db.sessions() as session:
             if await session.get(Workspace, DEFAULT_WORKSPACE_ID) is None:
                 session.add(Workspace(id=DEFAULT_WORKSPACE_ID, name="Default"))

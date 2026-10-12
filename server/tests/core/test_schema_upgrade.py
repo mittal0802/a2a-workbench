@@ -14,7 +14,7 @@ async def test_missing_nullable_columns_are_added(tmp_path):
     con.commit()
     con.close()
     db = Database(f"sqlite+aiosqlite:///{path}")
-    await db.create_schema()
+    await db.migrate()
     await db.dispose()
     cols = {r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(agent)")}
     assert {"extended_card", "selected_interface_url", "card_path"} <= cols
