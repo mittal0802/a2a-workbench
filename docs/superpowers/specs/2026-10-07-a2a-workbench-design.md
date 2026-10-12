@@ -586,8 +586,11 @@ runs, Health tab and global Health checks page, JSON/HTML reports,
 and the Claude Code skill. Zoo: `broken-*` agents, with one or more per check.
 
 **Phase 7 — Hosted instance and v1.0 release**
-Hosted mode (sign-in, per-user workspaces, SSRF guard, rate limits,
-Postgres), docs site, PyPI and GHCR publishing, v1.0.0 tag.
+Split by the maintainer's decision (2026-10-12):
+- **7a — v1.0 release:** Alembic migrations (with in-place upgrade of pre-1.0
+  databases), Postgres support, docs site, PyPI and GHCR publishing, v1.0.0 tag.
+- **7b — Hosted instance:** hosted mode (GitHub OAuth sign-in, per-user
+  workspaces, SSRF guard, rate limits, probe concurrency limits) on Postgres.
 
 **After v1 (candidates):** reasoning/thought display through known
 metadata/extension conventions, plus the upstream proposal; protocol

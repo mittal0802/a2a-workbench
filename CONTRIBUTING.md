@@ -18,3 +18,15 @@ cd ../web && pnpm install
 ## Commits
 
 Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`), small and focused.
+
+## Docs
+
+The site is built with MkDocs Material from `docs/` (`mkdocs.yml`). The pages under `docs/reference/` are generated from the code: after changing a check, a CLI command or a setting, run `cd server && uv run python ../scripts/gen_docs.py`. CI fails when they are stale.
+
+## Releasing
+
+1. Set `__version__` in `server/a2a_workbench/__init__.py` and add a `## <version>` section to `CHANGELOG.md`.
+2. Merge to `main` with CI green.
+3. Tag and push: `git tag -a v<version> -m "v<version>" && git push origin v<version>`.
+
+The `Release` workflow checks the tag against the version, runs CI, builds the wheel and sdist with the web UI inside, smoke-installs the wheel, publishes to PyPI (trusted publishing, no tokens), pushes the multi-arch image to `ghcr.io/mittal0802/a2a-workbench`, and creates the GitHub release from the changelog section.

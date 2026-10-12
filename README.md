@@ -14,15 +14,22 @@ Debug, test and conformance-check any [A2A](https://a2a-protocol.org) agent: a f
 - **Health checks**: probe an agent against every rule of the spec the SDK lets a client exercise (discovery, transports, messaging, task operations, streaming, push, security, extensions, error codes, resilience), with a score, fixes, evidence requests and JSON/HTML reports, from the UI, CLI (CI-friendly exit codes) or MCP.
 - **Script it**: every action is also a CLI command with `--json` / NDJSON output and stable exit codes, and an MCP tool for AI agents.
 
-> Status: Phase 6 of 7 (health checks). See the [design spec](docs/superpowers/specs/2026-10-07-a2a-workbench-design.md) for the roadmap: the hosted instance and releases come next.
+**Documentation: <https://mittal0802.github.io/a2a-workbench/>** · [Changelog](CHANGELOG.md)
 
 ## Quick start
 
 ```bash
-uvx a2a-workbench serve --open        # web UI on http://127.0.0.1:8484
-# or
+pipx install a2a-workbench            # or: uv tool install a2a-workbench
+a2a-workbench serve --open            # web UI on http://127.0.0.1:8484
+```
+
+or with Docker (amd64 and arm64):
+
+```bash
 docker run -p 8484:8484 -v a2aw:/data ghcr.io/mittal0802/a2a-workbench
 ```
+
+Postgres instead of SQLite: install `a2a-workbench[postgres]` and set `A2AW_DATABASE_URL=postgresql+asyncpg://…`; see [Self-hosting](https://mittal0802.github.io/a2a-workbench/self-hosting/) and the [Compose example](docker-compose.yml).
 
 No agent at hand? Start the built-in reference agent and connect `http://127.0.0.1:9999`:
 
@@ -45,7 +52,7 @@ a2a-workbench send http://localhost:9999 "inspect" \
 
 Exit codes: `0` ok, `1` checks failed, `2` usage error, `3` connection error, `4` auth error, `5` protocol error, `6` internal error.
 
-State lives in `~/.a2a-workbench/` (override with `A2AW_HOME`; database with `DATABASE_URL`).
+State lives in `~/.a2a-workbench/` (override with `A2AW_HOME`; database with `A2AW_DATABASE_URL` or `DATABASE_URL`). The schema is migrated automatically on start (`a2a-workbench db current` shows the revision).
 
 The server only answers to `localhost`, `127.0.0.1`, `::1` and its bind host, and rejects cross-site `Origin`s, so web pages you visit cannot reach it (DNS-rebinding protection). To open it under another name, set `A2AW_ALLOWED_HOSTS=workbench.lan,10.0.0.5`.
 
@@ -169,6 +176,10 @@ scripts/build.sh --no-wheel && (cd web && pnpm e2e)   # end-to-end
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Stability
+
+From 1.0 on, these follow [Semantic Versioning](https://semver.org) and only change incompatibly in a new major version: CLI commands, flags and exit codes; the health report JSON (schema `1`); the REST API under `/api`; and the MCP tool names and arguments. The hosted instance (sign-in and per-user workspaces) is planned for a later release.
 
 ## License
 
