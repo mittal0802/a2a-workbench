@@ -1,0 +1,62 @@
+site_name: A2A Workbench
+site_description: Debug, test and conformance-check A2A agents
+site_url: https://mittal0802.github.io/a2a-workbench/
+repo_url: https://github.com/mittal0802/a2a-workbench
+repo_name: mittal0802/a2a-workbench
+edit_uri: edit/main/docs/
+copyright: Apache-2.0
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - content.tabs.link
+    - navigation.sections
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+exclude_docs: |
+  superpowers/
+  design/
+  requirements.txt
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Quick start: quickstart.md
+  - Guides:
+      - Connect, chat and inspect: guides/connect.md
+      - Tasks: guides/tasks.md
+      - Fault injection: guides/faults.md
+      - Security and sign-in: guides/security.md
+      - Push notifications: guides/push.md
+      - Health checks: guides/health-checks.md
+      - Health checks in CI: guides/ci.md
+      - Assistant: guides/assistant.md
+      - Integrate: guides/integrate.md
+      - Use from AI agents (MCP): agents.md
+  - Self-hosting: self-hosting.md
+  - Reference:
+      - CLI: reference/cli.md
+      - Health checks: reference/checks.md
+      - Configuration: reference/configuration.md
+      - Known SDK gaps: upstream-gaps.md
