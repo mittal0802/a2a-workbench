@@ -14,6 +14,7 @@ from typing import Annotated, Any, NoReturn
 import typer
 from sqlalchemy.engine import make_url
 
+from a2a_workbench import __version__
 from a2a_workbench.cli.output import ExitCode, HumanPrinter, exit_code_for, print_json
 from a2a_workbench.core.config import Settings
 from a2a_workbench.core.connection.cards import CardFetchError
@@ -35,6 +36,26 @@ app = typer.Typer(
     help="Debug, test and conformance-check A2A agents.",
     pretty_exceptions_enable=False,
 )
+
+
+def _print_version(value: bool) -> None:
+    if value:
+        typer.echo(f"a2a-workbench {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version", callback=_print_version, is_eager=True, help="Show the version and exit."
+        ),
+    ] = False,
+) -> None:
+    """Debug, test and conformance-check A2A agents."""
+
+
 agents_app = typer.Typer(no_args_is_help=True, help="Manage registered agents.")
 app.add_typer(agents_app, name="agents")
 tasks_app = typer.Typer(no_args_is_help=True, help="Get, list, cancel and resubscribe to tasks.")
